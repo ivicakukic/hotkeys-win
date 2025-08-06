@@ -1,0 +1,59 @@
+[package]
+name = "hotkeys"
+version = "0.0.1"
+edition = "2021"
+description = "Global Shortcuts for Windows."
+authors = [ "Ivica Kukic <ivicakukic@gmail.com>" ]
+repository = "https://todo.com"
+homepage = "https://todo.com"
+documentation = "https://todo.com"
+readme = "README"
+keywords = ["Shortcut", "Key", "Windows"]
+license = "Apache-2.0"
+
+build = "build.rs"
+publish = false
+
+[build-dependencies]
+windres = "*"
+winres = "*"
+winapi = "*"
+
+[dependencies]
+log = "0.4.17"
+log4rs = { version = "1.1.1", features = ["toml_format"] }
+tray-item = "0.10.0"
+paste = "1.0.9"
+serde = { version = "1.0.144", features = ["derive"] }
+serde_json = "1.0.85"
+
+[dependencies.windows]
+version = "0.61.3"
+features = [
+    # "Foundation_Collections",
+    "Foundation_Numerics",
+    "Graphics",
+    "System",
+    # "UI_Composition_Desktop",
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_System_SystemServices",
+    # "Win32_System_WinRT",
+    # "Win32_System_WinRT_Composition",
+    "Win32_UI_Controls",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+]
+
+[[bin]]
+name = "hotkeys"
+path = "src/main.rs"
+#edition = "2021"
+
+[package.metadata.winres]
+OriginalFilename = "hotkeys.exe"
+FileDescription = "Global Shortcuts for Windows ⌨"
+LegalCopyright = "Copyright © 2022"
