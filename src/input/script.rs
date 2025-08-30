@@ -1,6 +1,10 @@
-use crate::app::settings::KeyboardLayout;
-
-use super::{steps::*, keys::{vkey::{self, VK_SHIFT, VK_ENTER}, ckey::{self, CharacterKey}}};
+use super::{
+    steps::*,
+    keys::{
+        vkey::{VK_SHIFT, VK_ENTER, VK_ALT, VK_CTRL, find_vkey_by_text},
+        ModifierState
+    }
+};
 
 pub struct InputScript {
     pub steps: Vec<Box<dyn InputStep>>
@@ -19,11 +23,11 @@ enum Token {
     WORD(String),
 }
 
-struct KeyCombination<'a> {
-    keys: Vec<vkey::VirtualKey<'a>>,
+struct KeyCombination {
+    keys: Vec<u16>,
 }
 
-impl<'a> Default for KeyCombination<'a> {
+impl Default for KeyCombination {
     fn default() -> Self {
         Self { keys: Default::default() }
     }
@@ -31,7 +35,7 @@ impl<'a> Default for KeyCombination<'a> {
 
 use Token::*;
 
-fn scan(text: &str) -> Vec<Token> {
+fn scan_shortcut_expression(text: &str) -> Vec<Token> {
     let txt = text.to_owned()
                 .replace("'+'", "_PLUS_")
                 .replace("+", " + ")
@@ -43,8 +47,8 @@ fn scan(text: &str) -> Vec<Token> {
         .filter(|val| { "".ne(**val) })
         .map(|val| {
             let low = val.to_lowercase();
-            let len = low.len();
             let chars = low.chars().collect::<Vec<char>>();
+            let len = chars.len();
             let is_quoted = (len == 3) && (chars[0] == '\'') && (chars[2] == '\'');
             let is_letter = len == 1;
 
@@ -63,16 +67,36 @@ fn scan(text: &str) -> Vec<Token> {
     tokens
 }
 
-fn parse<'a>(text: &'a str) -> Vec<KeyCombination<'a>> {
-    scan(text.to_lowercase().as_str())
+fn parse_shortcut_expression(text: &str) -> Vec<KeyCombination> {
+    scan_shortcut_expression(text.to_lowercase().as_str())
     .into_iter()
     .fold(Vec::new(), |mut acc, token| {
         match token {
-            CHAR(text) | QUOTED(text) | WORD(text) => {
+            WORD(text) => {
                 if acc.is_empty() {
                     acc.push(KeyCombination::default());
                 }
-                acc.last_mut().unwrap().keys.extend(vkey::find_vkey(text));
+                if let Some(vk) = find_vkey_by_text(text.clone()) {
+                    acc.last_mut().unwrap().keys.push(vk.vkey);
+                } else {
+                    log::error!(target:"input_api", "Unsupported key or modifier in shortcut expression: '{}'", text);
+                }
+            },
+            CHAR(text) | QUOTED(text) => {
+                assert!(text.chars().count() == 1);
+
+                if acc.is_empty() {
+                    acc.push(KeyCombination::default());
+                }
+
+                let char = text.chars().next().unwrap();
+                let (vk_code, modifiers) = super::keys::keyboard_api::char_to_vkey(char).unwrap_or_default();
+
+                if vk_code > 0 && modifiers.is_none() {
+                    acc.last_mut().unwrap().keys.push(vk_code);
+                } else {
+                    log::error!(target:"input_api", "Unsupported key or modifier in shortcut expression: '{}'", text);
+                }
             },
             PLUS => acc.push(KeyCombination::default())
         }
@@ -81,69 +105,94 @@ fn parse<'a>(text: &'a str) -> Vec<KeyCombination<'a>> {
 }
 
 pub fn for_shortcut(text: String) -> InputScript {
-    log::trace!("Shortcut: {}",  text);
+    log::debug!(target:"input_api", "Shortcut: {}",  text);
 
     let mut steps = vec![];
-    for cmb in parse(text.as_str()) {
+    for cmb in parse_shortcut_expression(text.as_str()) {
         steps.append(&mut cmb.keys.iter().map(
-            |key| map_virtual_key(key.vkey, true)).collect());
+            |key| Box::new(map_vk_code(*key, true)) as Box<dyn InputStep>).collect());
         steps.append(&mut cmb.keys.iter().rev().map(
-            |key| map_virtual_key(key.vkey, false)).collect());
+            |key| Box::new(map_vk_code(*key, false)) as Box<dyn InputStep>).collect());
     }
 
     InputScript { steps }
 }
 
-pub fn for_pause(pause: u16) -> InputScript {
-    log::trace!("Pause: {}ms",  pause);
+pub fn for_pause(pause: u64) -> InputScript {
+    log::debug!(target:"input_api", "Pause: {}ms",  pause);
     InputScript { steps: vec![
         Box::new( NoInput { pause } )
     ] }
 }
 
-pub fn for_text(text: String, layout: KeyboardLayout) -> InputScript {
-    log::trace!("Text: {}",  text);
-    for_text_or_line(text, false, layout)
+pub fn for_text(text: String) -> InputScript {
+    log::debug!(target:"input_api", "Text: {}",  text);
+    for_text_or_line(text, false)
 }
 
-pub fn for_line(text: String, layout: KeyboardLayout) -> InputScript {
-    log::trace!("Line: {}",  text);
-    for_text_or_line(text, true, layout)
+pub fn for_line(text: String) -> InputScript {
+    log::debug!(target:"input_api", "Line: {}",  text);
+    for_text_or_line(text, true)
 }
 
-fn for_text_or_line(text: String, new_line: bool, layout: KeyboardLayout) -> InputScript {
-    let ckey = ckey::with_layout(layout.mappings());
+fn for_text_or_line(text: String, new_line: bool) -> InputScript {
+    let mut steps = vec![];
 
-    InputScript { steps : vec![
-        Box::new(KeyInputs{
-            inputs : text.chars()
-                    .map(|ch| ckey.find_ckey(ch))
-                    .flatten()
-                    .chain( new_line.then_some(CharacterKey::new(VK_ENTER)) )
-                    .flat_map(|ck| map_character_key(ck) )
-                    .collect()
-        }) as Box<dyn InputStep>
-    ] }
+    for ch in text.chars() {
+        if let Some((vk_code, modifiers)) = super::keys::keyboard_api::char_to_vkey(ch) {
+            let inputs = map_character_key(vk_code, &modifiers);
+            steps.push(Box::new(KeyInputs { inputs }) as Box<dyn InputStep>);
+        }
+    }
+
+    if new_line {
+        let enter_inputs = map_character_key(VK_ENTER.vkey, &ModifierState::default());
+        steps.push(Box::new(KeyInputs { inputs: enter_inputs }) as Box<dyn InputStep>);
+    }
+
+    InputScript { steps }
 }
 
-fn map_virtual_key(vk_code: u16, key_down: bool) -> Box<dyn InputStep> {
-    Box::new( KeyInput { vk_code, key_down } )
+fn map_vk_code(vk_code: u16, key_down: bool) -> KeyInput {
+    KeyInput { vk_code, key_down }
 }
 
-fn map_character_key(ck: CharacterKey) -> Vec<KeyInput> {
-    vec![
-        ck.shift.then_some(KeyInput {vk_code:VK_SHIFT.vkey, key_down: true}),
-        Some(KeyInput {vk_code:ck.vkey.vkey, key_down: true}),
-        Some(KeyInput {vk_code:ck.vkey.vkey, key_down: false}),
-        ck.shift.then_some(KeyInput {vk_code:VK_SHIFT.vkey, key_down: false}),
-    ]
-    .into_iter().flatten().collect()
+fn map_character_key(vk_code: u16, modifiers: &ModifierState) -> Vec<KeyInput> {
+    let mut inputs = vec![];
+
+    if modifiers.ctrl {
+        inputs.push(KeyInput { vk_code: VK_CTRL.vkey, key_down: true });
+    }
+    if modifiers.shift {
+        inputs.push(KeyInput { vk_code: VK_SHIFT.vkey, key_down: true });
+    }
+    if modifiers.alt {
+        inputs.push(KeyInput { vk_code: VK_ALT.vkey, key_down: true });
+    }
+
+    inputs.push(KeyInput { vk_code, key_down: true });
+    inputs.push(KeyInput { vk_code, key_down: false });
+
+    if modifiers.alt {
+        inputs.push(KeyInput { vk_code: VK_ALT.vkey, key_down: false });
+    }
+
+    if modifiers.shift {
+        inputs.push(KeyInput { vk_code: VK_SHIFT.vkey, key_down: false });
+    }
+
+    if modifiers.ctrl {
+        inputs.push(KeyInput { vk_code: VK_CTRL.vkey, key_down: false });
+    }
+
+    inputs
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input::keys::vkey::{VK_CTRL, VK_SHIFT, VK_A, VK_K, VK_B};
+    use crate::input::keys::vkey::{VK_SHIFT};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{*};
 
     #[test]
     fn test_shortcut() {
@@ -153,9 +202,9 @@ mod tests {
 
         assert_eq!(script.steps[0].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_CTRL.vkey, key_down: true });
         assert_eq!(script.steps[1].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_SHIFT.vkey, key_down: true });
-        assert_eq!(script.steps[2].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_A.vkey, key_down: true });
+        assert_eq!(script.steps[2].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_A.0, key_down: true });
 
-        assert_eq!(script.steps[3].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_A.vkey, key_down: false });
+        assert_eq!(script.steps[3].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_A.0, key_down: false });
         assert_eq!(script.steps[4].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_SHIFT.vkey, key_down: false });
         assert_eq!(script.steps[5].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_CTRL.vkey, key_down: false });
     }
@@ -167,38 +216,39 @@ mod tests {
         assert_eq!(script.steps.len(), 8);
 
         assert_eq!(script.steps[0].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_CTRL.vkey, key_down: true });
-        assert_eq!(script.steps[1].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_K.vkey, key_down: true });
-        assert_eq!(script.steps[2].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_K.vkey, key_down: false });
+        assert_eq!(script.steps[1].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_K.0, key_down: true });
+        assert_eq!(script.steps[2].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_K.0, key_down: false });
         assert_eq!(script.steps[3].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_CTRL.vkey, key_down: false });
 
         assert_eq!(script.steps[4].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_CTRL.vkey, key_down: true });
-        assert_eq!(script.steps[5].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_B.vkey, key_down: true });
-        assert_eq!(script.steps[6].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_B.vkey, key_down: false });
+        assert_eq!(script.steps[5].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_B.0, key_down: true });
+        assert_eq!(script.steps[6].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_B.0, key_down: false });
         assert_eq!(script.steps[7].as_any().downcast_ref::<KeyInput>().unwrap(), &KeyInput { vk_code: VK_CTRL.vkey, key_down: false });
     }
 
     #[test]
     fn test_text() {
-        let script = for_text("abK".to_string(), KeyboardLayout::default());
+        let script = for_text("abK".to_string());
 
-        assert_eq!(script.steps.len(), 1);
-        assert_eq!(script.steps[0].as_any().downcast_ref::<KeyInputs>().unwrap().inputs.len(), 8);
+        assert_eq!(script.steps.len(), 3);
+        assert_eq!(script.steps[0].as_any().downcast_ref::<KeyInputs>().unwrap().inputs.len(), 2);
+        assert_eq!(script.steps[0].as_any().downcast_ref::<KeyInputs>().unwrap().inputs[0], KeyInput { vk_code: VK_A.0, key_down: true });
+        assert_eq!(script.steps[0].as_any().downcast_ref::<KeyInputs>().unwrap().inputs[1], KeyInput { vk_code: VK_A.0, key_down: false });
 
-        assert_eq!(script.steps[0].as_any().downcast_ref::<KeyInputs>().unwrap().inputs[0], KeyInput { vk_code: VK_A.vkey, key_down: true });
-        assert_eq!(script.steps[0].as_any().downcast_ref::<KeyInputs>().unwrap().inputs[1], KeyInput { vk_code: VK_A.vkey, key_down: false });
+        assert_eq!(script.steps[1].as_any().downcast_ref::<KeyInputs>().unwrap().inputs.len(), 2);
+        assert_eq!(script.steps[1].as_any().downcast_ref::<KeyInputs>().unwrap().inputs[0], KeyInput { vk_code: VK_B.0, key_down: true });
+        assert_eq!(script.steps[1].as_any().downcast_ref::<KeyInputs>().unwrap().inputs[1], KeyInput { vk_code: VK_B.0, key_down: false });
 
-        assert_eq!(script.steps[0].as_any().downcast_ref::<KeyInputs>().unwrap().inputs[2], KeyInput { vk_code: VK_B.vkey, key_down: true });
-        assert_eq!(script.steps[0].as_any().downcast_ref::<KeyInputs>().unwrap().inputs[3], KeyInput { vk_code: VK_B.vkey, key_down: false });
-
-        assert_eq!(script.steps[0].as_any().downcast_ref::<KeyInputs>().unwrap().inputs[4], KeyInput { vk_code: VK_SHIFT.vkey, key_down: true });
-        assert_eq!(script.steps[0].as_any().downcast_ref::<KeyInputs>().unwrap().inputs[5], KeyInput { vk_code: VK_K.vkey, key_down: true });
-        assert_eq!(script.steps[0].as_any().downcast_ref::<KeyInputs>().unwrap().inputs[6], KeyInput { vk_code: VK_K.vkey, key_down: false });
-        assert_eq!(script.steps[0].as_any().downcast_ref::<KeyInputs>().unwrap().inputs[7], KeyInput { vk_code: VK_SHIFT.vkey, key_down: false });
+        assert_eq!(script.steps[2].as_any().downcast_ref::<KeyInputs>().unwrap().inputs.len(), 4);
+        assert_eq!(script.steps[2].as_any().downcast_ref::<KeyInputs>().unwrap().inputs[0], KeyInput { vk_code: VK_SHIFT.vkey, key_down: true });
+        assert_eq!(script.steps[2].as_any().downcast_ref::<KeyInputs>().unwrap().inputs[1], KeyInput { vk_code: VK_K.0, key_down: true });
+        assert_eq!(script.steps[2].as_any().downcast_ref::<KeyInputs>().unwrap().inputs[2], KeyInput { vk_code: VK_K.0, key_down: false });
+        assert_eq!(script.steps[2].as_any().downcast_ref::<KeyInputs>().unwrap().inputs[3], KeyInput { vk_code: VK_SHIFT.vkey, key_down: false });
     }
 
     #[test]
     fn test_scan_basic_tokens() {
-        let tokens = scan("ctrl a");
+        let tokens = scan_shortcut_expression("ctrl a");
         assert_eq!(tokens.len(), 2);
 
         match &tokens[0] {
@@ -214,7 +264,7 @@ mod tests {
 
     #[test]
     fn test_scan_plus_token() {
-        let tokens = scan("ctrl + shift");
+        let tokens = scan_shortcut_expression("ctrl + shift");
         assert_eq!(tokens.len(), 3);
 
         match &tokens[0] {
@@ -235,7 +285,7 @@ mod tests {
 
     #[test]
     fn test_scan_quoted_plus() {
-        let tokens = scan("'+'");
+        let tokens = scan_shortcut_expression("'+'");
         assert_eq!(tokens.len(), 1);
 
         match &tokens[0] {
@@ -246,7 +296,7 @@ mod tests {
 
     #[test]
     fn test_scan_mixed_tokens() {
-        let tokens = scan("Ctrl Shift 'a' + F1");
+        let tokens = scan_shortcut_expression("Ctrl Shift 'a' + F1");
         assert_eq!(tokens.len(), 5);
 
         match &tokens[0] {
@@ -277,110 +327,99 @@ mod tests {
 
     #[test]
     fn test_scan_empty_string() {
-        let tokens = scan("");
+        let tokens = scan_shortcut_expression("");
         assert_eq!(tokens.len(), 0);
     }
 
     #[test]
     fn test_scan_spaces_only() {
-        let tokens = scan("   ");
+        let tokens = scan_shortcut_expression("   ");
         assert_eq!(tokens.len(), 0);
     }
 
     #[test]
     fn test_parse_single_combination() {
-        let combinations = parse("ctrl a");
+        let combinations = parse_shortcut_expression("ctrl a");
         assert_eq!(combinations.len(), 1);
         assert_eq!(combinations[0].keys.len(), 2);
-        assert_eq!(combinations[0].keys[0].title, "ctrl");
-        assert_eq!(combinations[0].keys[1].title, "a");
+        assert_eq!(combinations[0].keys[0], VK_CTRL.vkey);
+        assert_eq!(combinations[0].keys[1], VK_A.0);
     }
 
     #[test]
     fn test_parse_chord_combination() {
-        let combinations = parse("ctrl k + ctrl b");
+        let combinations = parse_shortcut_expression("ctrl k + ctrl b");
         assert_eq!(combinations.len(), 2);
 
         // First combination: Ctrl+K
         assert_eq!(combinations[0].keys.len(), 2);
-        assert_eq!(combinations[0].keys[0].title, "ctrl");
-        assert_eq!(combinations[0].keys[1].title, "k");
+        assert_eq!(combinations[0].keys[0], VK_CTRL.vkey);
+        assert_eq!(combinations[0].keys[1], VK_K.0);
 
         // Second combination: Ctrl+B
         assert_eq!(combinations[1].keys.len(), 2);
-        assert_eq!(combinations[1].keys[0].title, "ctrl");
-        assert_eq!(combinations[1].keys[1].title, "b");
+        assert_eq!(combinations[1].keys[0], VK_CTRL.vkey);
+        assert_eq!(combinations[1].keys[1], VK_B.0);
     }
 
     #[test]
     fn test_parse_multiple_modifiers() {
-        let combinations = parse("ctrl shift alt a");
+        let combinations = parse_shortcut_expression("ctrl shift alt a");
         assert_eq!(combinations.len(), 1);
         assert_eq!(combinations[0].keys.len(), 4);
-        assert_eq!(combinations[0].keys[0].title, "ctrl");
-        assert_eq!(combinations[0].keys[1].title, "shift");
-        assert_eq!(combinations[0].keys[2].title, "alt");
-        assert_eq!(combinations[0].keys[3].title, "a");
+        assert_eq!(combinations[0].keys[0], VK_CTRL.vkey);
+        assert_eq!(combinations[0].keys[1], VK_SHIFT.vkey);
+        assert_eq!(combinations[0].keys[2], VK_ALT.vkey);
+        assert_eq!(combinations[0].keys[3], VK_A.0);
     }
 
     #[test]
     fn test_parse_empty_string() {
-        let combinations = parse("");
+        let combinations = parse_shortcut_expression("");
         assert_eq!(combinations.len(), 0);
     }
 
     #[test]
     fn test_parse_quoted_characters() {
-        let combinations = parse("'a' + 'b'");
+        let combinations = parse_shortcut_expression("'a' + 'b'");
         assert_eq!(combinations.len(), 2);
         assert_eq!(combinations[0].keys.len(), 1);
-        assert_eq!(combinations[0].keys[0].title, "a");
+        assert_eq!(combinations[0].keys[0], VK_A.0);
         assert_eq!(combinations[1].keys.len(), 1);
-        assert_eq!(combinations[1].keys[0].title, "b");
+        assert_eq!(combinations[1].keys[0], VK_B.0);
     }
 
     #[test]
-    fn test_map_character_key_no_shift() {
-        use crate::input::keys::ckey::CharacterKey;
-        use crate::input::keys::vkey::VK_A;
-
-        let ckey = CharacterKey::new(VK_A);
-        let inputs = map_character_key(ckey);
-
-        assert_eq!(inputs.len(), 2);
-        assert_eq!(inputs[0], KeyInput { vk_code: VK_A.vkey, key_down: true });
-        assert_eq!(inputs[1], KeyInput { vk_code: VK_A.vkey, key_down: false });
+    fn test_ctrl_singlequote() {
+        let combinations = parse_shortcut_expression("Ctrl '");
+        assert_eq!(combinations.len(), 1);
+        assert_eq!(combinations[0].keys.len(), 2);
+        assert_eq!(combinations[0].keys[0], VK_CTRL.vkey);
+        assert_eq!(combinations[0].keys[1], VK_OEM_2.0); // VK_OEM_2 is the virtual key code for the single quote (') character
     }
+
 
     #[test]
     fn test_map_character_key_with_shift() {
-        use crate::input::keys::ckey::CharacterKey;
-        use crate::input::keys::vkey::{VK_A, VK_SHIFT};
-
-        let ckey = CharacterKey::new_sh(VK_A);
-        let inputs = map_character_key(ckey);
+        let inputs = map_character_key(VK_A.0, &ModifierState { shift: true, ..Default::default() });
 
         assert_eq!(inputs.len(), 4);
         assert_eq!(inputs[0], KeyInput { vk_code: VK_SHIFT.vkey, key_down: true });
-        assert_eq!(inputs[1], KeyInput { vk_code: VK_A.vkey, key_down: true });
-        assert_eq!(inputs[2], KeyInput { vk_code: VK_A.vkey, key_down: false });
+        assert_eq!(inputs[1], KeyInput { vk_code: VK_A.0, key_down: true });
+        assert_eq!(inputs[2], KeyInput { vk_code: VK_A.0, key_down: false });
         assert_eq!(inputs[3], KeyInput { vk_code: VK_SHIFT.vkey, key_down: false });
     }
 
     #[test]
     fn test_map_character_key_shift_sequence() {
-        use crate::input::keys::ckey::CharacterKey;
-        use crate::input::keys::vkey::{VK_1, VK_SHIFT};
-
         // Test mapping '!' which requires Shift+1
-        let ckey = CharacterKey::new_sh(VK_1);
-        let inputs = map_character_key(ckey);
+        let inputs = map_character_key(VK_1.0, &ModifierState { shift: true, ..Default::default() });
 
         assert_eq!(inputs.len(), 4);
         // Shift down, key down, key up, shift up
         assert_eq!(inputs[0], KeyInput { vk_code: VK_SHIFT.vkey, key_down: true });
-        assert_eq!(inputs[1], KeyInput { vk_code: VK_1.vkey, key_down: true });
-        assert_eq!(inputs[2], KeyInput { vk_code: VK_1.vkey, key_down: false });
+        assert_eq!(inputs[1], KeyInput { vk_code: VK_1.0, key_down: true });
+        assert_eq!(inputs[2], KeyInput { vk_code: VK_1.0, key_down: false });
         assert_eq!(inputs[3], KeyInput { vk_code: VK_SHIFT.vkey, key_down: false });
     }
 

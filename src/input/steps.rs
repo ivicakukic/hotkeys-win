@@ -18,7 +18,7 @@ pub struct KeyInputs {
 
 #[derive(Debug, PartialEq)]
 pub struct NoInput {
-    pub pause: u16
+    pub pause: u64
 }
 
 pub trait InputStep {
@@ -31,7 +31,7 @@ pub trait InputStep {
 impl InputStep for NoInput {
     fn play(&self) {
         if self.pause > 0 {
-            std::thread::sleep(Duration::from_millis(self.pause as u64));
+            std::thread::sleep(Duration::from_millis(self.pause));
         }
     }
     fn as_any(&self) -> &dyn Any {

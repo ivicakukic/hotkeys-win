@@ -1,0 +1,114 @@
+{
+  "color_schemes": [
+    {
+      "name": "default",
+      "opacity": 0.8,
+      "background": "#00007f",
+      "foreground1": "#9494d9",
+      "foreground2": "#dbdbec",
+      "tag_foreground": "#dbdbec",
+      "palette": [
+        "#ff0000",
+        "#00ff00",
+        "#0000ff"
+      ]
+    },
+    {
+      "name": "Blue",
+      "opacity": 0.8,
+      "background": "#00007f",
+      "foreground1": "#5454a9",
+      "foreground2": "#dbdbec",
+      "tag_foreground": "#b2b2d9",
+      "palette": [
+        "#ff0000",
+        "#00ff00",
+        "#0000ff"
+      ]
+    },
+    {
+      "name": "Blue2",
+      "opacity": 0.68,
+      "background": "#00007f",
+      "foreground1": "#9494d9",
+      "foreground2": "#dbdbec",
+      "tag_foreground": "#9494d9",
+      "palette": [
+        "#ffff00",
+        "#00ff00",
+        "#ffff00"
+      ]
+    },
+    {
+      "name": "Violet",
+      "opacity": 0.85,
+      "background": "#4a0d5d",
+      "foreground1": "#855c92",
+      "foreground2": "#e6dde8",
+      "tag_foreground": "#e6dde8",
+      "palette": [
+        "#ffff00",
+        "#00ff00",
+        "#0000ff"
+      ]
+    },
+    {
+      "name": "LightGray",
+      "opacity": 0.75,
+      "background": "#dbdbec",
+      "foreground1": "#7d7c79",
+      "foreground2": "#3d3c3a",
+      "tag_foreground": "#3d3c3a",
+      "palette": [
+        "#ff0000",
+        "#007300",
+        "#0000ff"
+      ]
+    },
+    {
+      "name": "Green",
+      "opacity": 0.85,
+      "background": "#00667f",
+      "foreground1": "#9494a6",
+      "foreground2": "#ffffff",
+      "tag_foreground": "#ffdbec",
+      "palette": [
+        "#ffff00",
+        "#ff0000",
+        "#0000ff"
+      ]
+    }
+  ],
+  "text_styles": [
+    {
+      "name": "default",
+      "header_font": "Comic Sans MS Bold 36",
+      "pad_header_font": "Consolas 18",
+      "pad_text_font": "Comic Sans MS Bold 26",
+      "pad_id_font": "Nirmala UI 18",
+      "tag_font": "Consolas Bold 18",
+      "palette": [
+        "Consolas 14",
+        "Consolas Italic 14",
+        "Consolas Bold 24",
+        "Cascadia Code Bold 28"
+      ]
+    },
+    {
+      "name": "Example",
+      "header_font": "Arial Bold 32",
+      "pad_header_font": "Consolas 18",
+      "pad_text_font": "Arial Bold 26",
+      "pad_id_font": "Impact 20",
+      "tag_font": "Consolas Bold 18",
+      "palette": [
+        "Consolas 14",
+        "Consolas Italic 14",
+        "Consolas Bold 24",
+        "Cascadia Code Bold 28"
+      ]
+    }
+  ],
+  "boards": [],
+  "padsets": []
+}

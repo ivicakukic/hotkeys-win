@@ -1,0 +1,51 @@
+name: Build and Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install 7zip
+        run: choco install 7zip -y
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Package release
+        run: |
+          mkdir release
+          mkdir release\resources
+          mkdir release\resources\icons
+          mkdir release\resources\schemas
+          mkdir release\docs\
+          copy target\release\hotkeys.exe release\
+          copy README.md release\
+          copy LICENSE release\
+          copy resources\settings.json release\resources\
+          copy resources\settings.*.json release\resources\
+          copy resources\log.toml release\resources\
+          copy resources\icons\gear.svg release\resources\icons\gear.svg
+          copy resources\icons\icon.png release\resources\icons\icon.png
+          xcopy resources\schemas release\resources\schemas\ /E /I
+          xcopy docs release\docs\ /E /I
+          7z a hotkeys-windows-${{ github.ref_name }}.zip release\*
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: hotkeys-windows-*.zip
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

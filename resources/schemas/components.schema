@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "color_schemes": {
+      "type": "array",
+      "items": {
+        "$ref": "definitions.schema#/$defs/ColorScheme"
+      }
+    },
+    "text_styles": {
+      "type": "array",
+      "items": {
+        "$ref": "definitions.schema#/$defs/TextStyle"
+      }
+    },
+    "keyboard_layouts": {
+      "type": "array",
+      "items": {
+        "$ref": "definitions.schema#/$defs/KeyboardLayout"
+      }
+    },
+    "boards": {
+      "type": "array",
+      "items": {
+        "$ref": "definitions.schema#/$defs/Board"
+      }
+    },
+    "padsets": {
+      "type": "array",
+      "items": {
+        "$ref": "definitions.schema#/$defs/Padset"
+      }
+    }
+  },
+  "required": [],
+  "additionalProperties": false
+}

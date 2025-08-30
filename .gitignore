@@ -2,3 +2,13 @@ target/
 .vscode/
 .claude/
 *.log
+
+# Developer resource configuration (personal overrides)
+dev-resources.toml
+resources/dev-settings.json
+resources/dev-settings.*.json
+resources/dev-log.toml
+resources/dev-data.json
+resources/icons/detected_*.png
+resources/mine/
+resources/*/mine/

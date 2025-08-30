@@ -47,7 +47,7 @@ fn create_input(vk_code: u16, key_down: bool) -> INPUT {
 
 impl Display for KeyboardInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{{{},{}}}",
+        write!(f, "{{{:#x},{}}}",
                         self.vk_code,
                         if self.key_down { "down" } else { "up" })
     }

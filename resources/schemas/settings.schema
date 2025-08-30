@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "includes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of additional settings files to include (assumed same directory as this file)"
+    },
+    "timeout": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 5,
+      "maximum": 10,
+      "description": "Timeout in seconds before the board auto-closes"
+    },
+    "feedback": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 50,
+      "maximum": 500,
+      "description": "Visual feedback delay for the pressed pad in milliseconds"
+    },
+    "editor": {
+      "type": "string",
+      "default": "notepad.exe",
+      "description": "Path to text editor used for editing text actions"
+    },
+    "color_schemes": {
+      "type": "array",
+      "items": {
+        "$ref": "definitions.schema#/$defs/ColorScheme"
+      }
+    },
+    "text_styles": {
+      "type": "array",
+      "items": {
+        "$ref": "definitions.schema#/$defs/TextStyle"
+      }
+    },
+    "keyboard_layout": {
+      "type": "string"
+    },
+    "keyboard_layouts": {
+      "type": "array",
+      "items": {
+        "$ref": "definitions.schema#/$defs/KeyboardLayout"
+      }
+    },
+    "boards": {
+      "type": "array",
+      "items": {
+        "$ref": "definitions.schema#/$defs/Board"
+      }
+    },
+    "padsets": {
+      "type": "array",
+      "items": {
+        "$ref": "definitions.schema#/$defs/Padset"
+      }
+    },
+    "layout": {
+      "$ref": "definitions.schema#/$defs/Layout"
+    }
+  },
+  "required": [
+    "timeout",
+    "feedback",
+    "editor",
+    "color_schemes",
+    "text_styles",
+    "boards",
+    "layout"
+  ],
+  "additionalProperties": false
+}

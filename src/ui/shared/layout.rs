@@ -13,7 +13,7 @@ use windows::{
 };
 
 
-use crate::ui::shared::utils::set_window_pos;
+use super::utils::reset_window_pos;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Rect {
@@ -24,10 +24,20 @@ pub struct Rect {
 }
 
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct WindowLayout {
     pub style: WindowStyle,
     pub rect: Rect,
+}
+
+impl Rect {
+    pub fn width(&self) -> i32 {
+        self.right - self.left
+    }
+
+    pub fn height(&self) -> i32 {
+        self.bottom - self.top
+    }
 }
 
 impl Default for WindowLayout {
@@ -40,7 +50,7 @@ impl Default for WindowLayout {
             Ok((screen_w, screen_h))
         }
 
-        let style = WindowStyle::Window;
+        let style = WindowStyle::Taskbar;
         let (width, height) = (800, 600);
         let (scr_width, scr_height) = get_screen_size().unwrap_or((width, height));
 
@@ -51,6 +61,17 @@ impl Default for WindowLayout {
         WindowLayout {
             style,
             rect: Rect { left, top, right: left + width, bottom: top + height },
+        }
+    }
+}
+
+impl Into<RECT> for Rect {
+    fn into(self) -> RECT {
+        RECT {
+            left: self.left,
+            top: self.top,
+            right: self.right,
+            bottom: self.bottom,
         }
     }
 }
@@ -75,7 +96,7 @@ impl WindowLayout {
 
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum WindowStyle {
     // Has title bar, borders, HAS taskbar icon (window, default)
     Window,
@@ -134,7 +155,7 @@ impl WindowStyle {
         unsafe {
             SetWindowLongW(hwnd, GWL_STYLE, new_style.0 as i32);
             SetWindowLongW(hwnd, GWL_EXSTYLE, new_ex_style.0 as i32);
-            set_window_pos(hwnd, is_topmost);
+            reset_window_pos(hwnd, is_topmost);
         }
     }
 

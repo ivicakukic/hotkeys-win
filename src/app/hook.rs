@@ -6,18 +6,13 @@ use std::process;
 
 
 use windows::Win32::{
-    UI::{
-        WindowsAndMessaging::{
-            HHOOK, SetWindowsHookExW, WH_KEYBOARD_LL, UnhookWindowsHookEx, CallNextHookEx,
-            GetForegroundWindow, GetWindowThreadProcessId, GetWindowRect,
-        },
-        Input::KeyboardAndMouse::GetAsyncKeyState,
-    },
-    Foundation::{HINSTANCE, WPARAM, LPARAM, CloseHandle, LRESULT, RECT, HANDLE},
-    System::{
-        Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ, PROCESS_ACCESS_RIGHTS},
-        ProcessStatus::K32GetProcessImageFileNameW,
-    },
+    Foundation::{CloseHandle, HANDLE, HINSTANCE, LPARAM, LRESULT, RECT, WPARAM}, System::{
+        ProcessStatus::K32GetProcessImageFileNameW, Threading::{OpenProcess, PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ}
+    }, UI::{
+        Input::KeyboardAndMouse::GetAsyncKeyState, WindowsAndMessaging::{
+            CallNextHookEx, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId, SetWindowsHookExW, UnhookWindowsHookEx, HHOOK, WH_KEYBOARD_LL
+        }
+    }
 };
 
 use crate::app::message::{Message, ProcessInfo};
@@ -144,6 +139,7 @@ fn get_foreground_process() -> ProcessInfo {
         let pid: Option<*mut u32> = Some(&mut 0);
         let fg_hwnd = GetForegroundWindow();
 
+        // Get Window Rect
         let mut lprect = RECT::default();
         let _ = GetWindowRect(fg_hwnd, &mut lprect);
 
@@ -155,11 +151,25 @@ fn get_foreground_process() -> ProcessInfo {
         let mut file_path: [u16; 500] = [0; 500];
         let file_path_len = K32GetProcessImageFileNameW(process_handle.handle(), &mut file_path) as usize;
 
-        let proc_info = ProcessInfo { pid, name: file_name(file_path, file_path_len) };
+        // Get window title
+        let mut title: [u16; 500] = [0; 500];
+        let title_len = windows::Win32::UI::WindowsAndMessaging::GetWindowTextW(fg_hwnd, &mut title);
+
+
+        let proc_info = ProcessInfo {
+            pid,
+            name: file_name(file_path, file_path_len),
+            title: title_name(title, title_len),
+            hwnd: fg_hwnd.0 as isize
+        };
         log::trace!("Foreground: {:?} {}", process_handle.handle(), proc_info);
 
         proc_info
     }
+}
+
+fn title_name(title: [u16; 500], title_len: i32) -> String {
+    OsString::from_wide(&title[0..title_len as usize]).to_string_lossy().to_string()
 }
 
 
@@ -189,3 +199,204 @@ impl Display for ProcessInfo {
         write!(f, "ProcInfo {{ pid: {}, name: '{}' }}", self.pid, &self.name)
     }
 }
+
+
+pub mod win_icon {
+
+    use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_GETICON, ICON_BIG, ICON_SMALL, GetClassLongPtrW, GCL_HICON, GCL_HICONSM}; // FindWindowW,
+    use windows::Win32::UI::WindowsAndMessaging::{GetIconInfo, ICONINFO, DrawIconEx, DI_NORMAL};
+    use windows::Win32::Graphics::Gdi::{GetObjectW, DeleteObject, BITMAP, CreateCompatibleDC, CreateCompatibleBitmap, SelectObject, GetDC, ReleaseDC, DeleteDC, GetDIBits, BITMAPINFOHEADER, BITMAPINFO, DIB_RGB_COLORS};
+    use windows::Win32::UI::WindowsAndMessaging::HICON;
+    use windows::Win32::Foundation::{WPARAM, LPARAM};
+    use std::{mem, path::PathBuf};
+    use image::{RgbaImage}; // Rgba
+
+    /// Get HICON dimensions, returns (width, height) or None if failed
+    unsafe fn get_icon_dimensions(hico: HICON) -> Option<(i32, i32)> {
+        let mut ii = ICONINFO::default();
+        let f_result = GetIconInfo(hico, &mut ii);
+
+        if f_result.is_ok() {
+            let mut bm = BITMAP::default();
+            let result = GetObjectW(
+                ii.hbmMask.into(),
+                mem::size_of::<BITMAP>() as i32,
+                Some(&mut bm as *mut _ as *mut _)
+            );
+
+            let dimensions = if result == mem::size_of::<BITMAP>() as i32 {
+                let width = bm.bmWidth;
+                let height = if !ii.hbmColor.0.is_null() { bm.bmHeight } else { bm.bmHeight / 2 };
+                Some((width, height))
+            } else {
+                None
+            };
+
+            // Clean up resources
+            if !ii.hbmMask.0.is_null() {
+                let _ = DeleteObject(ii.hbmMask.into());
+            }
+            if !ii.hbmColor.0.is_null() {
+                let _ = DeleteObject(ii.hbmColor.into());
+            }
+
+            dimensions
+        } else {
+            None
+        }
+    }
+
+    /// Convert HICON to RGBA image data
+    unsafe fn hicon_to_rgba(hicon: HICON, width: i32, height: i32) -> Option<RgbaImage> {
+        // Get desktop DC (null means desktop)
+        let desktop_dc = GetDC(None);
+        if desktop_dc.0.is_null() {
+            return None;
+        }
+
+        // Create compatible DC and bitmap
+        let mem_dc = CreateCompatibleDC(Some(desktop_dc));
+        let bitmap = CreateCompatibleBitmap(desktop_dc, width, height);
+
+        if mem_dc.0.is_null() || bitmap.0.is_null() {
+            ReleaseDC(None, desktop_dc);
+            return None;
+        }
+
+        let old_bitmap = SelectObject(mem_dc, bitmap.into());
+
+        // Draw the icon onto the bitmap
+        let result = DrawIconEx(
+            mem_dc,
+            0, 0,
+            hicon,
+            width, height,
+            0,
+            None, // No background brush
+            DI_NORMAL
+        );
+
+        if result.is_err() {
+            SelectObject(mem_dc, old_bitmap);
+            let _ = DeleteObject(bitmap.into());
+            let _ = DeleteDC(mem_dc);
+            ReleaseDC(None, desktop_dc);
+            return None;
+        }
+
+        // Prepare BITMAPINFO structure
+        let mut bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height, // Negative for top-down bitmap
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: 0, // BI_RGB
+                biSizeImage: 0,
+                biXPelsPerMeter: 0,
+                biYPelsPerMeter: 0,
+                biClrUsed: 0,
+                biClrImportant: 0,
+            },
+            bmiColors: [Default::default(); 1],
+        };
+
+        // Allocate buffer for pixel data
+        let buffer_size = (width * height * 4) as usize;
+        let mut buffer: Vec<u8> = vec![0; buffer_size];
+
+        // Get bitmap bits
+        let scanlines = GetDIBits(
+            mem_dc,
+            bitmap,
+            0,
+            height as u32,
+            Some(buffer.as_mut_ptr() as *mut _),
+            &mut bmi,
+            DIB_RGB_COLORS,
+        );
+
+        // Cleanup GDI resources
+        SelectObject(mem_dc, old_bitmap);
+        let _ = DeleteObject(bitmap.into());
+        let _ = DeleteDC(mem_dc);
+        ReleaseDC(None, desktop_dc);
+
+        if scanlines == 0 {
+            return None;
+        }
+
+        // Convert BGRA to RGBA
+        let mut rgba_buffer = Vec::with_capacity(buffer_size);
+        for chunk in buffer.chunks_exact(4) {
+            let b = chunk[0];
+            let g = chunk[1];
+            let r = chunk[2];
+            let a = chunk[3];
+            rgba_buffer.extend_from_slice(&[r, g, b, a]);
+        }
+
+        RgbaImage::from_raw(width as u32, height as u32, rgba_buffer)
+    }
+
+    /// Get icon from window handle using various methods
+    unsafe fn get_window_icon(hwnd: windows::Win32::Foundation::HWND, large: bool) -> Option<HICON> {
+        let icon_type = if large { ICON_BIG } else { ICON_SMALL };
+
+        // Try WM_GETICON first
+        let icon = SendMessageW(hwnd, WM_GETICON, Some(WPARAM(icon_type as usize)), Some(LPARAM(0)));
+        if icon.0 != 0 {
+            return Some(HICON(icon.0 as *mut _));
+        }
+
+        // Try GetClassLongPtr
+        let class_icon = if large {
+            GetClassLongPtrW(hwnd, GCL_HICON)
+        } else {
+            GetClassLongPtrW(hwnd, GCL_HICONSM)
+        };
+
+        if class_icon != 0 {
+            Some(HICON(class_icon as *mut _))
+        } else {
+            None
+        }
+    }
+
+    pub fn save_window_icon(hwnd: windows::Win32::Foundation::HWND, png_path: &PathBuf, large: bool) -> Result<(), Box<dyn std::error::Error>> {
+        unsafe {
+            if let Some(hicon) = get_window_icon(hwnd, large) {
+                if let Some((width, height)) = get_icon_dimensions(hicon) {
+                    log::debug!("Icon dimensions: {}x{}", width, height);
+                    if let Some(rgba_img) = hicon_to_rgba(hicon, width, height) {
+                        rgba_img.save(png_path)?;
+                        log::debug!("Saved icon to {}", png_path.display());
+                        // test_png_transparency(png_path.to_str().unwrap())?;
+                        return Ok(());
+                    } else {
+                        log::error!("Failed to convert HICON to RGBA image");
+                    }
+                } else {
+                    log::error!("Failed to get icon dimensions");
+                }
+            } else {
+                log::error!("No icon found for window");
+            }
+        }
+        Err("Failed to save window icon".into())
+    }
+
+    pub fn save_first_window_icon(hwnd: windows::Win32::Foundation::HWND, png_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+        // Try large icon first, then small icon
+        if save_window_icon(hwnd, png_path, true).is_ok() {
+            return Ok(());
+        }
+        if save_window_icon(hwnd, png_path, false).is_ok() {
+            return Ok(());
+        }
+        Err("No icon found for window".into())
+    }
+
+}
+

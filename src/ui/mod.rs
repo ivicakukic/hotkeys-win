@@ -1,3 +1,3 @@
-pub mod windows;
+pub mod dialogs;
 pub mod shared;
 pub mod components;

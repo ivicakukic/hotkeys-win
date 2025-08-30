@@ -13,7 +13,7 @@ use windows::{
 
 use crate::{
     framework::{Window, wnd_proc_router},
-    ui::shared::utils::set_window_pos,
+    ui::shared::utils::reset_window_pos,
     ui::shared::layout::WindowStyle::Floating
 };
 
@@ -75,7 +75,7 @@ impl MainWindow {
 
     unsafe fn on_create(&mut self) -> LRESULT {
         // no reason to apply the style here, it's already applied in the constructor
-        set_window_pos(self.hwnd, true);
+        reset_window_pos(self.hwnd, true);
         LRESULT(0)
     }
 

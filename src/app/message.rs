@@ -10,4 +10,6 @@ pub enum Message {
 pub struct ProcessInfo {
     pub pid: u32,
     pub name: String,
+    pub title: String,
+    pub hwnd: isize,
 }

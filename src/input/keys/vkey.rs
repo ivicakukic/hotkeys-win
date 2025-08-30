@@ -1,6 +1,6 @@
 use paste::paste;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VirtualKey<'a> {
     pub vkey: u16,
     pub title: &'a str,
@@ -55,42 +55,6 @@ virtual_keys! {
     "ins",       0x2D,   "ins";
     "del",       0x2E,   "del";
     "help",      0x2F,   "help";
-    "0",         0x30,   "0";
-    "1",         0x31,   "1";
-    "2",         0x32,   "2";
-    "3",         0x33,   "3";
-    "4",         0x34,   "4";
-    "5",         0x35,   "5";
-    "6",         0x36,   "6";
-    "7",         0x37,   "7";
-    "8",         0x38,   "8";
-    "9",         0x39,   "9";
-    "a",         0x41,   "a";
-    "b",         0x42,   "b";
-    "c",         0x43,   "c";
-    "d",         0x44,   "d";
-    "e",         0x45,   "e";
-    "f",         0x46,   "f";
-    "g",         0x47,   "g";
-    "h",         0x48,   "h";
-    "i",         0x49,   "i";
-    "j",         0x4A,   "j";
-    "k",         0x4B,   "k";
-    "l",         0x4C,   "l";
-    "m",         0x4D,   "m";
-    "n",         0x4E,   "n";
-    "o",         0x4F,   "o";
-    "p",         0x50,   "p";
-    "q",         0x51,   "q";
-    "r",         0x52,   "r";
-    "s",         0x53,   "s";
-    "t",         0x54,   "t";
-    "u",         0x55,   "u";
-    "v",         0x56,   "v";
-    "w",         0x57,   "w";
-    "x",         0x58,   "x";
-    "y",         0x59,   "y";
-    "z",         0x5A,   "z";
     "lwin",      0x5B,   "lwin";
     "rwin",      0x5C,   "rwin";
     "numpad0",   0x60,   "numpad0";
@@ -140,23 +104,19 @@ virtual_keys! {
     "rctrl",     0xA3,   "rctrl";
     "lalt",      0xA4,   "lalt";
     "ralt",      0xA5,   "ralt";
-    "semicol",   0xBA,   ";";
-    "plus",      0xBB,   "=";
-    "comma",     0xBC,   ",";
-    "minus",     0xBD,   "-";
-    "dot",       0xBE,   ".";
-    "slash",     0xBF,   "/";
-    "tick",      0xC0,   "`";
-    "lsbrck",    0xDB,   "[";
-    "backslash", 0xDC,   "\\";
-    "rsbrck",    0xDD,   "]";
-    "sqote" ,    0xDE,   "'";
 }
 
 
-pub fn find_vkey<'a>(text: String) -> Option<VirtualKey<'a>> {
+pub fn find_vkey_by_text<'a>(text: String) -> Option<VirtualKey<'a>> {
     ALL_KEYS.iter()
     .find(|vk| vk.matches(text.as_str()))
+    .cloned()
+    .cloned()
+}
+
+pub fn find_vkey_by_code<'a>(code: u16) -> Option<VirtualKey<'a>> {
+    ALL_KEYS.iter()
+    .find(|vk| vk.vkey == code)
     .cloned()
     .cloned()
 }
@@ -167,8 +127,7 @@ mod tests {
 
     #[test]
     fn test_virtual_keys() {
-        assert_eq!(VK_F1, find_vkey("f1".to_owned()).unwrap());
-        assert_eq!(VK_NUMLOCK, find_vkey("numlock".to_owned()).unwrap());
-        assert_eq!(VK_P, find_vkey("p".to_owned()).unwrap());
+        assert_eq!(VK_F1, find_vkey_by_text("f1".to_owned()).unwrap());
+        assert_eq!(VK_NUMLOCK, find_vkey_by_text("numlock".to_owned()).unwrap());
     }
 }

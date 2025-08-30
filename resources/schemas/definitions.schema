@@ -1,0 +1,617 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "definitions.schema",
+  "title": "HotKeys Schema Definitions",
+  "description": "Common schema definitions for HotKeys configuration",
+  "$defs": {
+    "Pad": {
+      "type": "object",
+      "properties": {
+        "header": {
+          "type": "string",
+          "description": "Header text for the pad"
+        },
+        "text": {
+          "type": "string",
+          "description": "Main text content for the pad"
+        },
+        "icon": {
+          "type": "string",
+          "description": "Icon file",
+          "pattern": "^([a-zA-Z0-9_-]+/)*[a-zA-Z0-9_-]+\\.(png|svg)$"
+        },
+        "text_style" : {
+          "type": "string",
+          "description": "Optional text style name, has to match one of the defined text styles"
+        },
+        "color_scheme" : {
+          "type": "string",
+          "description": "Optional color scheme name, has to match one of the defined color schemes"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ActionType"
+          },
+          "description": "List of actions that will be executed when the pad is pressed. Each action can be a shortcut, pause, line, text, command, open URL, or set default board."
+        },
+        "board": {
+          "type": "string",
+          "description": "If specified, pressing the pad will navigate to this board"
+        },
+        "board_params": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Param"
+          },
+          "description": "Optional parameters to pass to the board when navigating to it. Each parameter has a name and a value."
+        }
+      },
+      "additionalProperties": false
+    },
+    "ActionType": {
+      "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "Shortcut": {
+              "type": "string",
+              "description": "Sends a keyboard shortcut to the target application. Use ' ' or '+' to separate keys, e.g. 'Ctrl C' or 'Ctrl+C' for copy. But, to describe chords like 'Ctrl K + Ctrl B', use '+' to separate the sequences while using ' ' to separate keys within a sequence.",
+              "examples": [
+                "Ctrl C",
+                "Ctrl+C",
+                "Ctrl K + Ctrl B"
+              ]
+            }
+          },
+          "required": [
+            "Shortcut"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Pause": {
+              "type": "number",
+              "description": "Pause in ms before executing the next action. This allows for delays between actions, to allow the target app enough time to process the previous action (e.g. open menu, open new tab)",
+              "default": 50.0
+            }
+          },
+          "required": [
+            "Pause"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Line": {
+              "type": "string",
+              "description": "Sends a line of text to the target application (ENTER automatically appended). Can be used to enter commands, search terms, or any text input."
+            }
+          },
+          "required": [
+            "Line"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Text": {
+              "type": "string",
+              "description": "Sends a line of text to the target application without appending ENTER. Useful for entering text that does not require immediate submission."
+            }
+          },
+          "required": [
+            "Text"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Paste": {
+              "type": "string",
+              "description": "Copies the specified text to the clipboard and sends 'CTRL V' to the target application. Can be used for entering long text snippets, URLs, or any text input that benefits from clipboard usage."
+            }
+          },
+          "required": [
+            "Paste"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "PasteEnter": {
+              "type": "string",
+              "description": "Same as Paste, but sends an additional ENTER after pasting the text."
+            }
+          },
+          "required": [
+            "PasteEnter"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "SetDefaultBoard": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 2,
+              "maxItems": 2,
+              "description": "Sets the default board for the given profile. The first item is the profile name, the second item is the board name. This allows switching the default board dynamically based on the context or user preference.",
+              "examples": [
+                [
+                  "browsers",
+                  "chrome"
+                ],
+                [
+                  "productivity",
+                  "todo"
+                ]
+              ]
+            }
+          },
+          "required": [
+            "SetDefaultBoard"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "OpenUrl": {
+              "type": "string",
+              "description": "Opens the specified URL in the default web browser. This can be used to quickly access web resources, documentation, or any online service."
+            }
+          },
+          "required": [
+            "OpenUrl"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Command": {
+              "type": "string",
+              "description": "Executes a shell command asynchronously without waiting for completion. Output and errors are ignored (redirected to /dev/null). Use for system commands like starting services or scripts.",
+              "examples": [
+                "docker start my-container",
+                "systemctl restart nginx",
+                "echo 'Hello World'"
+              ]
+            }
+          },
+          "required": [
+            "Command"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Custom": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Param"
+                  }
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+              "Custom"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Detection": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "xprop": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "xprop"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ps": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ps"
+          ]
+        },
+
+        {
+          "type": "object",
+          "properties": {
+            "win32": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "win32"
+          ]
+        },
+        {
+          "type": "string",
+          "enum": [
+            "none"
+          ]
+        }
+      ]
+    },
+    "ColorScheme": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.9,
+          "description": "Board opacity (1 is fully opaque)"
+        },
+        "background": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "description": "Background color in hex format"
+        },
+        "foreground1": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "description": "Line color in hex format"
+        },
+        "foreground2": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "description": "Text color in hex format"
+        },
+        "tag_foreground": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "description": "Tag/label color in hex format"
+        },
+        "palette": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^#[0-9A-Fa-f]{6}$"
+          },
+          "minItems": 0,
+          "description": "Optional color palette for extended theming, e.g. for custom boards"
+        }
+      },
+      "required": [
+        "name",
+        "opacity",
+        "background",
+        "foreground1",
+        "foreground2",
+        "tag_foreground"
+      ],
+      "additionalProperties": false
+    },
+    "TextStyle": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the text style"
+        },
+        "header_font": {
+          "type": "string",
+          "examples": [
+            "Impact Bold Oblique 26"
+          ],
+          "description": "Font for the board header"
+        },
+        "pad_header_font": {
+          "type": "string",
+          "examples": [
+            "Consolas 14"
+          ],
+          "description": "Font for the pad header"
+        },
+        "pad_text_font": {
+          "type": "string",
+          "examples": [
+            "Arial Bold 16"
+          ],
+          "description": "Font for the pad text"
+        },
+        "pad_id_font": {
+          "type": "string",
+          "examples": [
+            "Impact Bold 16"
+          ],
+          "description": "Font for the pad ID"
+        },
+        "tag_font": {
+          "type": "string",
+          "examples": [
+            "Consolas Bold 18"
+          ],
+          "description": "Font for tags or additional labels"
+        },
+        "palette": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 0,
+          "description": "Optional font palette for extended theming, e.g. for custom boards"
+        }
+      },
+      "required": [
+        "name",
+        "header_font",
+        "pad_header_font",
+        "pad_text_font",
+        "pad_id_font",
+        "tag_font"
+      ],
+      "additionalProperties": false
+    },
+    "KeyboardLayout": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "mappings": {
+          "$ref": "#/$defs/Mappings"
+        }
+      },
+      "required": [
+        "name",
+        "mappings"
+      ],
+      "additionalProperties": false
+    },
+    "Mappings": {
+      "type": "object",
+      "patternProperties": {
+        "^.$": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "Board": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/BoardType"
+        },
+        "title": {
+          "type": "string",
+          "description": "Board title"
+        },
+        "name": {
+          "type": "string",
+          "description": "Unique identifier for the board"
+        },
+        "icon": {
+          "type": "string",
+          "description": "Icon file",
+          "pattern": "^([a-zA-Z0-9_-]+/)*[a-zA-Z0-9_-]+\\.(png|svg)$"
+        },
+        "color_scheme": {
+          "type": "string",
+          "description": "Color scheme name, has to match one of the defined color schemes",
+          "default": "Blue"
+        },
+        "text_style": {
+          "type": "string",
+          "description": "Text style name, has to match one of the defined text styles",
+          "default": "default"
+        },
+        "detection": {
+          "$ref": "#/$defs/Detection",
+          "description": "Detection method for the board. 'xprop' uses X11 properties, 'ps' uses process name, 'none' is used for sub-boards or when detection is not needed"
+        },
+        "base_pads": {
+          "type": "string",
+          "description": "Name of the pad set to use as base pads for this board. The pad set has to be defined in the 'padsets' section."
+        },
+        "modifier_pads": {
+          "$ref": "#/$defs/ModifierPads"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "ModifierPads": {
+      "type": "object",
+      "patternProperties": {
+        "^(Ctrl)(\\+Shift)?(\\+Alt)?(\\+Super)?$|^(Shift)(\\+Alt)?(\\+Super)?$|^(Alt)(\\+Super)?$|^(Super)$": {
+          "type": "string",
+          "description": "Name of the pad set to use for this modifier key combination. The pad set has to be defined in the 'padsets' section."
+        }
+      },
+      "description": "Modifier pads for the board, these are shown when the corresponding modifier keys are pressed. The keys can be Ctrl, Shift, Alt, Super (Windows key). The order of modifiers matters.",
+      "additionalProperties": false
+    },
+    "Padset": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "static"
+          ],
+          "default": "static",
+          "description": "PadSet type. 'static' is a regular pad set."
+        },
+        "name": {
+          "type": "string",
+          "description": "Unique identifier for the pad set"
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 9,
+          "items": {
+            "$ref": "#/$defs/Pad"
+          },
+          "description": "List of pads in this pad set"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "Profile": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the profile"
+        },
+        "boards": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "List of board names that are part of this profile. Each name must match a board defined in the 'boards' section."
+        },
+        "default": {
+          "type": "string",
+          "description": "Default board name for this profile. This board will be shown if no other board was detected."
+        }
+      },
+      "required": [
+        "name",
+        "boards",
+        "default"
+      ],
+      "additionalProperties": false
+    },
+    "Layout": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "integer"
+        },
+        "y": {
+          "type": "integer"
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "window_style": {
+          "type": "string",
+          "enum": [
+            "Window",
+            "Taskbar"
+          ],
+          "default": "Taskbar",
+          "description": "Style of the main window. 'Window' shows a regular window with a title bar. 'Taskbar' has no title bar."
+        }
+      },
+      "required": [
+        "width",
+        "height",
+        "window_style"
+      ],
+      "additionalProperties": false
+    },
+    "BoardType": {
+        "oneOf": [
+          {
+            "type": "string",
+            "enum": [
+              "static",
+              "home"
+            ],
+            "default": "static"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "custom": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string"
+                  },
+                  "params": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/Param"
+                    }
+                  }
+                },
+                "required": [
+                  "type"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+               "custom"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "description": "Type of the board. 'static' is a regular board, 'home' is the home board that shows all available boards, or a 'custom' object with type and parameters."
+    },
+    "Param": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the parameter"
+        },
+        "value": {
+          "type": "string",
+          "description": "Value of the parameter"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "additionalProperties": false,
+      "description": "A parameter for custom board types or actions"
+    }
+  }
+}

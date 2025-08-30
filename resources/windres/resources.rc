@@ -1,0 +1,13 @@
+id ICON "resources/windres/icon.ico"
+
+// String Editor Dialog
+STRING_EDITOR DIALOGEX 0, 0, 300, 120
+STYLE 0x80C80080L
+CAPTION "Edit String"
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT           "",1001,10,10,280,20
+    EDITTEXT        1002,10,30,280,20,0x50010080L
+    DEFPUSHBUTTON   "OK",1,190,80,50,20
+    PUSHBUTTON      "Cancel",2,250,80,50,20
+END
