@@ -1,6 +1,6 @@
 [package]
 name = "hotkeys"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Global Shortcuts for Windows."
 authors = [ "Ivica Kukic <ivicakukic@gmail.com>" ]

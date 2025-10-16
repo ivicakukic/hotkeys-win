@@ -28,6 +28,11 @@
       "default": "notepad.exe",
       "description": "Path to text editor used for editing text actions"
     },
+    "natural_key_order": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether to use natural key order for regular number keys"
+    },
     "color_schemes": {
       "type": "array",
       "items": {

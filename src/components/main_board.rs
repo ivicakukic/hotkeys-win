@@ -6,26 +6,31 @@ use windows::Win32::Foundation::WPARAM;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
 
+use crate::components::PadMapping;
 use crate::core::{ActionType, Param, Params, PathString, Resources, SettingsRepository, SettingsRepositoryMut};
-use crate::model::{Board, PadSet, Anchor, ColorScheme, Pad, PadId, Tag, TextStyle, ColorSchemeHandle, TextStyleHandle, BoardHandle};
+use crate::model::{DeleteBoardUseCase, create_modifier_pad_set, delete_modifier_pad_set, Anchor, Board, BoardHandle, ColorScheme, ColorSchemeHandle, Pad, PadId, PadSet, Tag, TextStyle, TextStyleHandle};
 use crate::input::{ModifierState, TextCapture, KeyCombinationCapture, capture::{DisplayFormats, DisplayFormatable}};
 use crate::{impl_board_component, impl_board_component_generic, impl_has_board};
 use crate::ui::dialogs::open_pad_editor;
 
 use super::{
-    BoardComponent, ChildWindowRequest, DelegatingBoard, HasBoard, KeyboardEvent, MouseEventTarget, LayoutAction, UiEvent, UiEventHandler, UiEventResult,
-    SimpleBoard, StringEditorBoard, LayoutBoard, SettingsBoard,
-    apply_string, controls::Tags, INITIAL_PATH_PARAM
+    BoardComponent, ChildWindowRequest, DelegatingBoard, HasBoard, KeyboardEvent, MouseEventTarget, LayoutAction, UiEvent, UiEventHandler, UiEventResult, SimpleBoard, LayoutBoard, SettingsBoard, EnumAll, EnumTraversal, Tags,
+    apply_string, error_board, string_editor_board, success_board, yes_no_warning_board, INITIAL_PATH_PARAM
 };
+
+enum MainBoardContext {
+    DeleteBoard,
+    DeleteBoardSuccess,
+}
 
 /// MainBoard - main board (C->olorSchemeSelectorBoard, t->TextStyleSelectorBoard)
 pub struct MainBoard<R: SettingsRepository + SettingsRepositoryMut> {
     inner: Box<dyn Board>,
     params: Vec<Param>,
     resources: Resources,
-    repository: Rc<R>,
-    modifier: ModifierState,
+    repository: Rc<R>
 }
+
 
 impl_has_board!(MainBoard<R>);
 
@@ -35,13 +40,12 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> MainBoard<R> {
             inner: SimpleBoard::new_box(repository.clone(), board_name),
             params,
             resources,
-            repository,
-            modifier: ModifierState::default(),
+            repository
         }
     }
 
     fn create_simple_board(&self) -> Box<SimpleBoard<R>> {
-        SimpleBoard::new_box(self.repository.clone(), self.inner.name())
+        SimpleBoard::new_box(self.repository.clone(), self.name())
     }
 
     fn request_edit_mode(&mut self, params: Vec<Param>) -> UiEventResult {
@@ -87,23 +91,33 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> MainBoard<R> {
         }
     }
 
-    fn key_down(&mut self, ke: KeyboardEvent) -> UiEventResult {
-        self.modifier = ke.modifiers;
+    fn request_confirm_delete(&self) -> UiEventResult {
+        UiEventResult::PushState {
+            board: Box::new(
+                yes_no_warning_board(
+                    format!("Delete board \"{}\"?", self.name()),
+                    self
+                )
+            ),
+            context: Box::new(MainBoardContext::DeleteBoard),
+        }
+    }
 
+    fn key_down(&mut self, ke: KeyboardEvent) -> UiEventResult {
         let vk_code = VIRTUAL_KEY(ke.key as u16);
         match vk_code {
             VK_E => {
-                self.modifier = ModifierState::default();
                 self.request_edit_mode(vec![])
             },
             VK_S => {
-                self.modifier = ModifierState::default();
                 self.request_settings_board()
             }
             VK_X => {
-                self.modifier = ModifierState::default();
                 self.request_move_or_size()
             }
+            VK_D => {
+                self.request_confirm_delete()
+            },
             VK_W => {
                 if self.repository.is_dirty() && self.repository.flush().is_ok() {
                     return UiEventResult::RequiresRedraw
@@ -114,12 +128,12 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> MainBoard<R> {
         }
     }
 
-    fn key_up(&mut self, ke: KeyboardEvent) -> UiEventResult {
-        if self.modifier != ke.modifiers {
-            self.modifier = ke.modifiers;
-            return UiEventResult::RequiresRedraw;
-        }
-        UiEventResult::NotHandled
+    fn key_up(&mut self, _ke: KeyboardEvent) -> UiEventResult {
+        UiEventResult::RequiresRedraw
+    }
+
+    fn uc(&self) -> DeleteBoardUseCase<R> {
+        DeleteBoardUseCase::new(self.repository.clone(), self.name().to_string())
     }
 
     fn get_initial_path(&self) -> Option<Param> {
@@ -131,22 +145,26 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> MainBoard<R> {
 
 impl<R: SettingsRepository + SettingsRepositoryMut> DelegatingBoard for MainBoard<R> {
 
-    fn delegate_tags(&self) -> Vec<Tag> {
-        // Add dirty indicator tag if repository has unsaved changes
-        if self.modifier.is_any() {
-            let modifier = self.modifier.to_string();
-            let mut tags = vec![ Tag { text: modifier, anchor: Anchor::SE, font_idx: Some(0), ..Default::default() }, ];
+    fn delegate_tags(&self, modifier: Option<ModifierState>) -> Vec<Tag> {
+        let mut tags = Vec::<Tag>::new();
 
-            if self.modifier.shift {
-                let options = format!("e: edit board\ns: open settings\nx: window layout{}", if self.repository.is_dirty() { "   w: save changes" } else { "" });
-                tags.push(Tag { text: options, anchor: Anchor::SW, font_idx: Some(0), ..Default::default() });
+        if let Some(modifier) = modifier.filter(|m| m.is_any()) {
+            tags.push(
+                Tag { text: modifier.to_string(), anchor: Anchor::SE, font_idx: Some(0), ..Default::default() }
+            );
+
+            tags.push(Tag { text: "e: edit    x: layout\nd: delete  s: settings".to_string(), anchor: Anchor::SW, font_idx: Some(0), ..Default::default() });
+            if self.repository.is_dirty() {
+                tags.push(Tag { text: "w: save".to_string(), anchor: Anchor::NE, font_idx: Some(0), ..Default::default() });
             }
-            tags
-        } else if self.repository.is_dirty() {
-            vec![ Tag { text: "(*)".to_string(), anchor: Anchor::NE, ..Default::default() } ]
-        } else {
-            vec![]
+            return tags;
         }
+
+        if self.repository.is_dirty() {
+            tags.push(Tag { text: "(*)".to_string(), anchor: Anchor::NE, ..Default::default() });
+        }
+
+        tags
     }
 }
 
@@ -160,6 +178,39 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> UiEventHandler for
                     MouseEventTarget::Header => self.request_edit_mode(vec![]),
                     _ => UiEventResult::NotHandled,
                 }
+            }
+        }
+    }
+
+    fn handle_child_result(&mut self, context: Box<dyn Any>, result: Box<dyn Any>) -> UiEventResult {
+        let operation = match context.downcast_ref::<MainBoardContext>() {
+            Some(c) => c,
+            None => return UiEventResult::NotHandled,
+        };
+        match operation {
+            MainBoardContext::DeleteBoard => {
+                if let Some(confirmed) = result.downcast_ref::<bool>() {
+                    if *confirmed {
+                        match self.uc().delete() {
+                            Ok(()) => {
+                                return UiEventResult::PushState {
+                                    board: Box::new(success_board(format!("Deleted board:\n\n\"{}\"", self.name()),self)),
+                                    context: Box::new(MainBoardContext::DeleteBoardSuccess),
+                                }
+                            }
+                            Err(e) => {
+                                return UiEventResult::PushState {
+                                    board: Box::new(error_board(format!("{}", e), self)),
+                                    context: Box::new(()),
+                                }
+                            }
+                        }
+                    }
+                }
+                UiEventResult::NotHandled
+            },
+            MainBoardContext::DeleteBoardSuccess => {
+                UiEventResult::CloseWindow
             }
         }
     }
@@ -307,7 +358,7 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> DelegatingBoard fo
         self.item.borrow().clone().unwrap_or_else(|| self.board().color_scheme())
     }
 
-    fn delegate_tags(&self) -> Vec<Tag> {
+    fn delegate_tags(&self, _modifier: Option<ModifierState>) -> Vec<Tag> {
         self.get_tags("Colors")
     }
 }
@@ -340,7 +391,7 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> DelegatingBoard fo
         self.item.borrow().clone().unwrap_or_else(|| self.board().text_style())
     }
 
-    fn delegate_tags(&self) -> Vec<Tag> {
+    fn delegate_tags(&self, _modifier: Option<ModifierState>) -> Vec<Tag> {
         self.get_tags("Fonts")
     }
 }
@@ -350,12 +401,13 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> DelegatingBoard fo
 
 enum EditOperation {
     TitleEdit,
+    DeletePadSet(ModifierState),
 }
 
 pub struct EditModeBoard<R: SettingsRepository + SettingsRepositoryMut> {
     inner: Box<dyn Board>,
     repository: Rc<R>,
-    params: Vec<Param>,
+    params: Vec<Param>
 }
 
 impl_has_board!(EditModeBoard<R>);
@@ -366,19 +418,13 @@ impl <R: SettingsRepository + SettingsRepositoryMut + 'static> EditModeBoard<R> 
     }
 
     fn create_simple_board(&self) -> Box<SimpleBoard<R>> {
-        SimpleBoard::new_box(self.repository.clone(), self.inner.name())
+        SimpleBoard::new_box(self.repository.clone(), self.name())
     }
 
     fn request_title_editor(&mut self) -> UiEventResult {
-        let board_box = Box::new(StringEditorBoard {
-            text_capture: TextCapture::new(self.inner.title().into(), false),
-            text_style: Some(self.inner.text_style()),
-            color_scheme: Some(self.inner.color_scheme()),
-            tags: vec![
-                Tag { text: "Title".to_string(), anchor: Anchor::NW, color_idx: Some(0), ..Default::default() },
-                Tags::EscEnter.default(),
-            ],
-        });
+        let board_box = Box::new(string_editor_board(
+            self.title(),self, "Title".to_string()
+        ));
         UiEventResult::PushState {
             board: board_box,
             context: Box::new(EditOperation::TitleEdit),
@@ -420,6 +466,59 @@ impl <R: SettingsRepository + SettingsRepositoryMut + 'static> EditModeBoard<R> 
         }
     }
 
+    fn request_delete_modifier(&mut self, modifier: ModifierState) -> UiEventResult {
+        UiEventResult::PushState {
+            board: Box::new(yes_no_warning_board(format!("Delete padset?\n\n\"{}\"", modifier), self)),
+            context: Box::new(EditOperation::DeletePadSet(modifier)),
+        }
+    }
+
+    fn can_create_modifier_padset(&self, modifier: ModifierState) -> bool {
+        if !modifier.is_any() {
+            return false;
+        }
+        let board = self.repository.get_board(self.name().as_str()).unwrap();
+        if !board.has_modifier(modifier.to_string().as_str()) {
+            return true;
+        }
+        false
+    }
+
+    fn can_delete_modifier_padset(&self, modifier: ModifierState) -> bool {
+        if !modifier.is_any() {
+            return false;
+        }
+        let board = self.repository.get_board(self.name().as_str()).unwrap();
+        if board.has_modifier(modifier.to_string().as_str()) {
+            return true;
+        }
+        false
+    }
+
+    fn create_modifier_padset(&self, modifier: ModifierState) -> UiEventResult {
+        UiEventResult::PushState {
+            board: Box::new(
+                match create_modifier_pad_set(self.repository.as_ref(), self.name(), modifier) {
+                    Ok(padset) => success_board(format!("Created padset:\n\n\"{}\"", padset.name), self),
+                    Err(e) => error_board(format!("{}", e), self)
+                }
+            ),
+            context: Box::new(()),
+        }
+    }
+
+    fn delete_modifier_padset(&self, modifier: ModifierState) -> UiEventResult {
+        UiEventResult::PushState {
+            board: Box::new(
+                match delete_modifier_pad_set(self.repository.as_ref(), self.name(), modifier.to_string()) {
+                    Ok(()) => success_board(format!("Deleted padset:\n\n\"{}\"", modifier), self),
+                    Err(e) => error_board(format!("{}", e), self)
+                }
+            ),
+            context: Box::new(()),
+        }
+    }
+
     fn key_down(&mut self, key: u32, modifiers: ModifierState) -> UiEventResult {
         use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
@@ -440,21 +539,25 @@ impl <R: SettingsRepository + SettingsRepositoryMut + 'static> EditModeBoard<R> 
             return self.request_text_style_selector()
         }
 
+        if vk_code == VK_OEM_MINUS && self.can_delete_modifier_padset(modifiers) {
+            return self.request_delete_modifier(modifiers);
+        }
+
+        if vk_code == VK_OEM_PLUS && self.can_create_modifier_padset(modifiers) {
+            return self.create_modifier_padset(modifiers);
+        }
+
         // Handle numpad keys 1-9 for pad editing
-        let pad_id = match vk_code {
-            VK_NUMPAD1 => PadId::One,
-            VK_NUMPAD2 => PadId::Two,
-            VK_NUMPAD3 => PadId::Three,
-            VK_NUMPAD4 => PadId::Four,
-            VK_NUMPAD5 => PadId::Five,
-            VK_NUMPAD6 => PadId::Six,
-            VK_NUMPAD7 => PadId::Seven,
-            VK_NUMPAD8 => PadId::Eight,
-            VK_NUMPAD9 => PadId::Nine,
+        let pad_id = match self.pad_mapping().map(vk_code) {
+            Some(pad_id) => pad_id,
             _ => return UiEventResult::NotHandled,
         };
 
         self.request_pad_editor(modifiers, pad_id)
+    }
+
+    fn key_up(&mut self, _key: u32, _modifiers: ModifierState) -> UiEventResult {
+        return UiEventResult::RequiresRedraw
     }
 
     fn right_mouse_down(&mut self, target: MouseEventTarget, modifiers: ModifierState) -> UiEventResult {
@@ -473,16 +576,34 @@ impl <R: SettingsRepository + SettingsRepositoryMut + 'static> EditModeBoard<R> 
             .find(|p| p.name == INITIAL_PATH_PARAM)
             .cloned()
     }
+
+    fn pad_mapping(&self) -> PadMapping<R> {
+        PadMapping { repository: self.repository.clone() }
+    }
 }
 
 impl<R: SettingsRepository + SettingsRepositoryMut + 'static> DelegatingBoard for EditModeBoard<R> {
-    fn delegate_tags(&self) -> Vec<Tag> {
-        vec![
+    fn delegate_tags(&self, modifier: Option<ModifierState>) -> Vec<Tag> {
+        let mut tags = vec![
             Tag { text: "Editing".to_string(), anchor: Anchor::NW, font_idx: None, color_idx: Some(0), ..Default::default() },
-            Tag { text: "1-9: pad, F2: rename".to_string(), anchor: Anchor::SW, font_idx: Some(1), color_idx: None, ..Default::default() },
             Tags::EscEnter.default(),
-            Tag { text: "c: colors, f: fonts".to_string(), anchor: Anchor::SE, font_idx: Some(1), color_idx: None, ..Default::default() },
-        ]
+            Tag { text: "c: colors, f: fonts".to_string(), anchor: Anchor::SE, font_idx: Some(0), ..Default::default() },
+            Tag { text: "1-9: pad, F2: rename".to_string(), anchor: Anchor::SW, font_idx: Some(0), ..Default::default() }
+        ];
+
+        let modifier = modifier.unwrap_or_default();
+        if modifier.is_none() {
+            return tags;
+        }
+
+        let modifier_cmd = match self.can_create_modifier_padset(modifier) {
+            true => format!("+: add ({})", modifier.to_string()),
+            false => format!("-: delete ({})", modifier.to_string()),
+        };
+        // Replace the SW tag with the modifier command
+        tags.pop();
+        tags.push(Tag { text: modifier_cmd, anchor: Anchor::SW, font_idx: Some(0), ..Default::default() });
+        tags
     }
 }
 
@@ -527,10 +648,12 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> UiEventHandler for
             UiEvent::KeyDown(ke) => {
                 self.key_down(ke.key, ke.modifiers)
             }
+            UiEvent::KeyUp(ke) => {
+                self.key_up(ke.key, ke.modifiers)
+            }
             UiEvent::RightMouseDown(me) => {
                 self.right_mouse_down(me.target, me.modifiers)
             }
-            _ => UiEventResult::NotHandled,
         }
     }
 
@@ -543,6 +666,14 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> UiEventHandler for
             EditOperation::TitleEdit => {
                 apply_string(result, |title| self.update_board_title(title.to_string()))
             }
+            EditOperation::DeletePadSet(modifier) => {
+                if let Some(confirmed) = result.downcast_ref::<bool>() {
+                    if *confirmed {
+                        return self.delete_modifier_padset(*modifier)
+                    }
+                }
+                UiEventResult::NotHandled
+            }
         }
     }
 }
@@ -551,7 +682,7 @@ impl_board_component_generic!(EditModeBoard<R>);
 
 impl<R: SettingsRepository + SettingsRepositoryMut + 'static> EditModeBoard<R> {
     fn update_board_title(&mut self, new_title: String) -> Result<(), Box<dyn std::error::Error>> {
-        let board_handle = BoardHandle::new(self.repository.clone(), self.inner.name());
+        let board_handle = BoardHandle::new(self.repository.clone(), self.name());
         board_handle.set_title(Some(new_title))?;
         Ok(())
     }
@@ -563,12 +694,26 @@ enum PadEditOperation {
     ShortcutEdit,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone)]
 enum PadEditorMode {
     Header,
     Text,
     Action,
+    Board,
 }
+
+impl EnumAll<PadEditorMode> for PadEditorMode {
+    fn all() -> Vec<PadEditorMode> {
+        vec![
+            PadEditorMode::Header,
+            PadEditorMode::Text,
+            PadEditorMode::Action,
+            PadEditorMode::Board,
+        ]
+    }
+}
+
+
 
 impl Default for PadEditorMode {
     fn default() -> Self {
@@ -576,28 +721,11 @@ impl Default for PadEditorMode {
     }
 }
 
-impl PadEditorMode {
-    fn next(&self) -> Self {
-        match self {
-            PadEditorMode::Header => PadEditorMode::Text,
-            PadEditorMode::Text => PadEditorMode::Action,
-            PadEditorMode::Action => PadEditorMode::Header,
-        }
-    }
-    fn previous(&self) -> Self {
-        match self {
-            PadEditorMode::Header => PadEditorMode::Action,
-            PadEditorMode::Text => PadEditorMode::Header,
-            PadEditorMode::Action => PadEditorMode::Text,
-        }
-    }
-}
-
 pub struct PadEditorBoard<R:SettingsRepository+SettingsRepositoryMut>{
     inner:Box<dyn Board>,
     pad_id:PadId,
     modifier_state:ModifierState,
-    current_edit:PadEditorMode,
+    edit:PadEditorMode,
     item:RefCell<Option<Pad>>,
     repository:Rc<R>,
 }
@@ -607,7 +735,7 @@ impl <R:SettingsRepository+SettingsRepositoryMut> PadEditorBoard<R>{
             inner,
             pad_id,
             modifier_state,
-            current_edit: PadEditorMode::default(),
+            edit: PadEditorMode::default(),
             item:RefCell::new(None),
             repository,
         }
@@ -651,6 +779,26 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> PadEditorBoard<R> 
         }
     }
 
+    #[allow(dead_code)]
+    fn request_default_editor(&mut self) -> UiEventResult {
+        fn is_shortcut_assumed(pad: &Pad) -> bool {
+            if pad.actions().is_empty() {
+                return true;
+            } else if pad.actions().len() == 1 {
+                if let ActionType::Shortcut(_) = &pad.actions()[0] {
+                    return true;
+                }
+            }
+            false
+        }
+
+        if is_shortcut_assumed(&self.get_pad()) {
+            self.request_shortcut_editor()
+        } else {
+            self.request_pad_editor()
+        }
+    }
+
     fn set_first_action_shortcut(&self, value: String) -> Result<(), Box<dyn std::error::Error>> {
         let value = value.trim().to_string();
         if value.is_empty() {
@@ -667,37 +815,47 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> PadEditorBoard<R> 
 
 impl<R: SettingsRepository + SettingsRepositoryMut + 'static> DelegatingBoard for PadEditorBoard<R> {
     fn delegate_title(&self) -> String {
-        match self.current_edit {
+        match self.edit {
             PadEditorMode::Header => "Pad header".to_string(),
             PadEditorMode::Text => "Pad text".to_string(),
             PadEditorMode::Action => "Pad actions".to_string(),
+            PadEditorMode::Board => "Navigation".to_string(),
         }
     }
     fn delegate_padset(&self, _modifier: Option<ModifierState>) -> Box<dyn PadSet> {
         let mut pad = self.get_pad();
 
-        match self.current_edit {
+        match self.edit {
             PadEditorMode::Header => pad.data.header = Some(pad.data.header.clone().unwrap_or_default() + "|"),
             PadEditorMode::Text => pad.data.text = Some(pad.data.text.clone().unwrap_or_default() + "|"),
             PadEditorMode::Action => {},
+            PadEditorMode::Board => {},
         }
 
-        let (anchor, tag_text) = match self.current_edit {
+        let cnt_actions = pad.actions().len();
+        let action_str = match cnt_actions {
+            0 => "-".to_string(),
+            1 => "1 action".to_string(),
+            n => format!("{} actions", n),
+        };
+
+        let (anchor, tag_text) = match self.edit {
             PadEditorMode::Header => (Anchor::NW, Tags::RightBlack.to_string()),
             PadEditorMode::Text => (Anchor::W, Tags::RightBlack.to_string()),
-            PadEditorMode::Action => (Anchor::SW, format!("{} Actions ({})", Tags::RightBlack.to_string(), pad.actions().len())),
+            PadEditorMode::Action => (Anchor::SW, format!("{} {}", Tags::RightBlack.to_string(), action_str)),
+            PadEditorMode::Board => (Anchor::SW, format!("{} {}", Tags::RightBlack.to_string(), pad.board().unwrap_or("-".to_string()))),
         };
         pad.tags.extend(vec![Tag{ text: tag_text, anchor, color_idx: Some(0), ..Default::default() }]);
 
         Box::new(vec![pad])
     }
-    fn delegate_tags(&self) -> Vec<Tag> {
+    fn delegate_tags(&self, _modifier: Option<ModifierState>) -> Vec<Tag> {
         let mut tags = vec![
             Tag{ text: format!("Pad {}", self.pad_id.to_string()), anchor: Anchor::NW, font_idx: None, color_idx: Some(0), ..Default::default() },
             Tags::EscEnter.default()
         ];
-        if self.current_edit == PadEditorMode::Action {
-            tags.push(Tag{ text: "e: editor, s: shortcut, c: clear".to_string(), anchor: Anchor::SW, font_idx: Some(1), color_idx: None, ..Default::default() });
+        if self.edit == PadEditorMode::Action || self.edit == PadEditorMode::Board {
+            tags.push(Tag{ text: "c: clear pad, e: edit, s: shortcut".to_string(), anchor: Anchor::SW, font_idx: Some(1), color_idx: None, ..Default::default() });
             tags.push(Tag{ text: "▷   ".to_string(), anchor: Anchor::SE, font_idx: Some(2), color_idx: Some(0), ..Default::default() });
         }
         tags.push(Tags::DownUp.default());
@@ -713,11 +871,11 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> UiEventHandler for
                 let vk_code = VIRTUAL_KEY(ke.key as u16);
                 match vk_code {
                     VK_UP => {
-                        self.current_edit = self.current_edit.previous();
+                        self.edit = self.edit.previous();
                         UiEventResult::RequiresRedraw
                     }
                     VK_DOWN => {
-                        self.current_edit = self.current_edit.next();
+                        self.edit = self.edit.next();
                         UiEventResult::RequiresRedraw
                     }
                     VK_ESCAPE => {
@@ -727,7 +885,7 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> UiEventHandler for
                         if other == VK_RETURN && ke.modifiers.is_none() {
                             if let Some(pad) = self.item.borrow().as_ref() {
                                 // Save the updated pad
-                                let board_handle = BoardHandle::<R>::new(self.repository.clone(), self.inner.name());
+                                let board_handle = BoardHandle::<R>::new(self.repository.clone(), self.name());
                                 if let Ok(padset_handle) = board_handle.padset(Some(self.modifier_state.clone())) {
                                     if let Err(e) = padset_handle.set_pad(pad.clone()) {
                                         log::error!("Failed to update pad: {}", e);
@@ -738,35 +896,38 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> UiEventHandler for
                             return UiEventResult::NotHandled
                         }
 
-                        if self.current_edit == PadEditorMode::Action {
-                            match other {
-                                VK_S | VK_RIGHT => return self.request_shortcut_editor(),
-                                VK_E => return self.request_pad_editor(),
+                        if self.edit == PadEditorMode::Action || self.edit == PadEditorMode::Board {
+                            return match other {
+                                VK_E => self.request_pad_editor(),
                                 VK_C => {
                                     let mut pad = self.get_pad();
                                     pad.data = Default::default();
                                     self.set_pad(pad);
-                                    return UiEventResult::RequiresRedraw;
-                                }
-                                _ => {}
+                                    UiEventResult::RequiresRedraw
+                                },
+                                VK_S => self.request_shortcut_editor(),
+                                VK_RIGHT => if self.edit == PadEditorMode::Action {
+                                    self.request_default_editor()
+                                } else {
+                                    self.request_pad_editor()
+                                },
+                                _ => UiEventResult::NotHandled
                             }
                         }
 
+
                         let mut pad = self.get_pad();
-                        let mut text_capture = TextCapture::new(match self.current_edit {
+                        let mut text_capture = TextCapture::new(match self.edit {
                             PadEditorMode::Header => pad.data.header.clone(),
                             PadEditorMode::Text => pad.data.text.clone(),
-                            PadEditorMode::Action => return UiEventResult::NotHandled,
-                        }, match self.current_edit {
-                            PadEditorMode::Header | PadEditorMode::Text => true,
-                            PadEditorMode::Action => return UiEventResult::NotHandled,
-                        });
+                            _  => unreachable!()
+                        }, true);
                         text_capture.on_keydown(WPARAM(ke.key as usize), ke.modifiers);
                         let final_text = text_capture.text();
-                        match self.current_edit {
+                        match self.edit {
                             PadEditorMode::Header => pad.data.header = final_text,
                             PadEditorMode::Text => pad.data.text = final_text,
-                            PadEditorMode::Action => {},
+                            _ => unreachable!(),
                         }
 
                         self.set_pad(pad);
@@ -781,7 +942,7 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> UiEventHandler for
     fn create_child_window(&mut self, request: ChildWindowRequest, parent_hwnd: windows::Win32::Foundation::HWND) -> UiEventResult {
         match request {
             ChildWindowRequest::PadEditor => {
-                if let Some(pad) = open_pad_editor(self.get_pad(), Some(parent_hwnd)) {
+                if let Some(pad) = open_pad_editor(self.get_pad(), Some(parent_hwnd), self.repository.boards(), self.edit == PadEditorMode::Board) {
                     self.set_pad(pad);
                     UiEventResult::RequiresRedraw
                 } else {
@@ -845,7 +1006,7 @@ impl Board for ShortcutEditorBoard {
             }
         )
     }
-    fn tags(&self) -> Vec<Tag> {
+    fn tags(&self, _modifier: Option<ModifierState>) -> Vec<Tag> {
         let mut tags = vec![
             Tag { text: "Shortcut".to_string(), anchor: Anchor::NW, color_idx: Some(0), ..Default::default() },
         ];

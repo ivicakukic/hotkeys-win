@@ -12,5 +12,5 @@ use board_factory::BoardFactoryImpl;
 use board_manager::BoardManager;
 
 pub use app::Application;
-pub use action_factory::ActionFactoryRegistry;
-pub use board_factory::BoardFactoryRegistry;
+pub use action_factory::{ ActionFactoryRegistry };
+pub use board_factory::{ BoardFactoryRegistry, BoardFactory, BoardRuntimeContext };

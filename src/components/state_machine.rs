@@ -55,6 +55,23 @@ impl BoardStateMachine {
         }
     }
 
+
+    fn process_state_result_internal(&mut self, result: UiEventResult) -> UiEventResult {
+        match result {
+            UiEventResult::CloseWindow => {
+                return UiEventResult::CloseWindow
+            },
+            UiEventResult::PushState { board, context } => {
+                self.process_state_result(UiEventResult::PushState { board, context });
+            },
+            UiEventResult::ReplaceState { board } => {
+                self.process_state_result(UiEventResult::ReplaceState { board });
+            },
+            _ => {},
+        }
+        UiEventResult::RequiresRedraw
+    }
+
     pub fn process_state_result(&mut self, result: UiEventResult) -> UiEventResult {
         match result {
             UiEventResult::PushState { board, context: contract } => {
@@ -65,11 +82,7 @@ impl BoardStateMachine {
                     .handler()
                     .map_or(UiEventResult::NotHandled, |h| h.activate());
 
-                if let UiEventResult::PushState { board, context } = activate_result {
-                    self.process_state_result(UiEventResult::PushState { board, context });
-                }
-
-                UiEventResult::RequiresRedraw
+                self.process_state_result_internal(activate_result)
             }
 
             UiEventResult::PopState { result } => {
@@ -78,16 +91,16 @@ impl BoardStateMachine {
                     log::info!("Popped state, stack depth now {}", self.stack_depth());
 
                     if let Some(handler) = self.current_board().handler() {
-                        let _ = handler.handle_child_result(popped_frame.context.unwrap(), result);
+                        let handle_child_result = handler.handle_child_result(popped_frame.context.unwrap(), result);
+                        return self.process_state_result_internal(handle_child_result);
                     }
                 }
                 UiEventResult::RequiresRedraw
             }
 
             UiEventResult::ReplaceState { board } => {
-                if let Some(current) = self.stack.last_mut() {
-                    current.board = board;
-                }
+                self.stack.pop();
+                self.process_state_result(UiEventResult::PushState { board, context: Box::new(()) });
                 UiEventResult::RequiresRedraw
             }
 

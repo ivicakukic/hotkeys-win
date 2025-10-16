@@ -1,3 +1,4 @@
+use crate::core::integration::ChainParams;
 use crate::core::{self, slugify_process_name, BoardType, DetectedIcon, Detection, SettingsRepository, SettingsRepositoryMut};
 use crate::model::{ColorScheme, ModifierState, Pad, PadId, PadSet, TextStyle};
 use std::rc::Rc;
@@ -273,59 +274,37 @@ pub fn convert_padset(pads: &[core::Pad], repository: &dyn SettingsRepository) -
             p.color_scheme.as_ref().and_then(|name| repository.get_color_scheme(name)).map(|cs| cs.into()),
             p.text_style.as_ref().and_then(|name| repository.get_text_style(name)).map(|ts| ts.into()),
             vec![], // tags are a model level concern, not applied when converting core to model
+            false
         )
     }).collect()
 
 }
 
-#[allow(dead_code)]
-pub fn convert_pad(pad: &core::Pad, pad_id: PadId, repository: &dyn SettingsRepository) -> Pad {
-    Pad::new(
-        pad_id,
-        pad.clone(),
-        pad.color_scheme.as_ref().and_then(|name| repository.get_color_scheme(name)).map(|cs| cs.into()),
-        pad.text_style.as_ref().and_then(|name| repository.get_text_style(name)).map(|ts| ts.into()),
-        vec![], // tags are a model level concern, not applied when converting core to model
-    )
-}
-
-
-
-/// UseCases - specific operations that can be performed on the model/repository
-/// All use cases require repository access
+/// UseCases - require repository access
 
 pub struct CreateDetectableBoardUseCase<R: SettingsRepository + SettingsRepositoryMut> {
     repository: Rc<R>,
     process_name: String,
+    #[allow(dead_code)]
     window_title: Option<String>,
     icon: Option<DetectedIcon>
 }
 
 impl<R: SettingsRepository + SettingsRepositoryMut> CreateDetectableBoardUseCase<R> {
-    pub fn new(repository: Rc<R>, process_name: String) -> Self {
+    pub fn new(repository: Rc<R>, process_name: String, window_title: Option<String>, icon: Option<DetectedIcon>) -> Self {
         Self {
             repository,
             process_name,
-            window_title: None,
-            icon: None
+            window_title,
+            icon
         }
-    }
-
-    pub fn with_window_title(mut self, title: Option<String>) -> Self {
-        self.window_title = title;
-        self
-    }
-
-    pub fn with_icon(mut self, icon: Option<DetectedIcon>) -> Self {
-        self.icon = icon;
-        self
     }
 
     pub fn board_name(&self) -> String {
         slugify_process_name(&self.process_name)
     }
 
-    pub fn execute(&self) -> Result<core::Board, Box<dyn std::error::Error>> {
+    pub fn create_board(&self) -> Result<core::Board, Box<dyn std::error::Error>> {
         let name = slugify_process_name(&self.process_name);
 
         if self.repository.get_board(&name).is_ok() {
@@ -339,11 +318,11 @@ impl<R: SettingsRepository + SettingsRepositoryMut> CreateDetectableBoardUseCase
             None => None
         };
 
-        let title = self.window_title.clone().or(Some(name.clone()));
+        // let title = self.window_title.clone().or(Some(name.clone()));
 
         let board = core::Board {
             name: name.clone(),
-            title: title,
+            title: name.clone().into(),
             icon: icon_name,
             board_type: BoardType::Static,
             color_scheme: None,
@@ -361,4 +340,290 @@ impl<R: SettingsRepository + SettingsRepositoryMut> CreateDetectableBoardUseCase
     }
 }
 
+/// Creates a new non-detectable Static board with visual settings copied from the parent board.
+/// Name of the new board is formed by appending a slugified version of the keyword to the parent board's name.
+/// e.g if parent_board is "chrome" and keyword is "console", new board name will be "chrome/console".
+pub fn create_board<R: SettingsRepository + SettingsRepositoryMut>(
+    repository: &R, parent_board: String, keyword: String
+) -> Result<core::Board, Box<dyn std::error::Error>> {
 
+    let root_parent = if parent_board.contains('/') {
+        let (base, _) = parent_board.rsplit_once('/').unwrap();
+        if let Ok(_) = repository.get_board(base) {
+            base.to_string()
+        } else {
+            parent_board.clone()
+        }
+    } else {
+        parent_board.clone()
+    };
+
+    let name = format!("{}/{}", root_parent, slugify_process_name(&keyword));
+
+    // ensure board does not already exist
+    if repository.get_board(&name).is_ok() {
+        return Err("A board with this name already exists".into());
+    }
+
+    // ensure parent board exists and is a detectable static board with Win32 detection
+    let parent = repository.get_board(&parent_board)
+        .map_err(|_| "Parent board does not exist")?;
+
+    match parent.board_type {
+        BoardType::Static => {}
+        _ => return Err("Parent board must be of type Static".into()),
+    }
+
+    // match parent.detection {
+    //     Detection::Win32(_) => {}
+    //     _ => return Err("Parent board must have Win32 detection".into()),
+    // }
+
+    // create the new board, inheriting color scheme, text style and icon from parent, setting title to keyword
+    let board = core::Board {
+        name: name.clone(),
+        title: Some(keyword.clone()),
+        icon: parent.icon.clone(),
+        color_scheme: parent.color_scheme.clone(),
+        text_style: parent.text_style.clone(),
+        base_pads: Some(name.clone()),
+        ..Default::default()
+    };
+
+    let padset = core::PadSet::new(name.as_str(), vec![]);
+
+    repository.add_board(board)?;
+    repository.add_padset(padset)?;
+    repository.get_board(&name)
+}
+
+
+
+pub struct DeleteBoardUseCase<R: SettingsRepository + SettingsRepositoryMut> {
+    repository: Rc<R>,
+    board_name: String
+}
+
+impl<R: SettingsRepository + SettingsRepositoryMut> DeleteBoardUseCase<R> {
+    pub fn new(repository: Rc<R>, board_name: String) -> Self {
+        Self {
+            repository,
+            board_name,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        // Check for references in PadSets (pad.board - board navigation)
+        let first_referencing_padset = self.repository.padsets().iter()
+            .find_map(|padset_name| {
+                if let Ok(padset) = self.repository.get_padset(padset_name) {
+                    for pad in &padset.items {
+                        if pad.board.as_ref().map_or(false, |b| b == &self.board_name) {
+                            return Some(padset_name.clone());
+                        }
+                    }
+                }
+                None
+            });
+
+        match first_referencing_padset {
+            Some(ref padset_name) => {
+                return Err(format!("Board\n\"{}\"\nis referenced by PadSet\n\"{}\"", self.board_name, padset_name).into());
+            },
+            _ => {}
+        }
+
+        // Check for references in chain boards
+        let first_referencing_chain_board = self.repository.boards().iter()
+            .find_map(|board_name| {
+                if let Ok(board) = self.repository.get_board(board_name) {
+                    if let BoardType::Chain(params) = &board.board_type {
+                        if params.boards().contains(&self.board_name) {
+                            return Some(board_name.clone());
+                        }
+                    }
+                }
+                None
+            });
+
+        match first_referencing_chain_board {
+            Some(ref board_name) => {
+                return Err(format!("Board \"{}\"\nis listed in Collection\n\"{}\"", self.board_name, board_name).into());
+            },
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    pub fn delete(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.validate()?;
+        delete_board(self.repository.as_ref(), self.board_name.clone())
+    }
+}
+
+/// Deletes a board and its associated pad sets.
+pub fn delete_board<R: SettingsRepository + SettingsRepositoryMut>(
+    repository: &R, board_name: String
+) -> Result<(), Box<dyn std::error::Error>> {
+    let board = repository.get_board(&board_name)?;
+
+    repository.delete_board(&board.name)?;
+
+    if let Some(base_padset_name) = board.base_pads {
+        repository.delete_padset(&base_padset_name)?;
+    }
+
+    for padset_name in board.modifier_pads.values() {
+        repository.delete_padset(padset_name)?;
+    }
+
+    Ok(())
+}
+
+pub fn create_modifier_pad_set<R: SettingsRepository + SettingsRepositoryMut>(
+    repository: &R, board_name: String, modifier: ModifierState
+) -> Result<core::PadSet, Box<dyn std::error::Error>> {
+    let mut board = repository.get_board(&board_name)?;
+    let modifier = &modifier.to_string();
+
+    if board.modifier_pads.contains_key(modifier) {
+        return Err("This modifier pad set already exists for the board".into());
+    }
+
+    let padset_name = format!("{}/{}", board_name, slugify_process_name(modifier));
+    let padset = core::PadSet::new(padset_name.as_str(), vec![]);
+
+    board.modifier_pads.insert(modifier.to_string(), padset_name.clone());
+
+    repository.add_padset(padset)?;
+    repository.set_board(board)?;
+    repository.get_padset(&padset_name)
+}
+
+pub fn delete_modifier_pad_set<R: SettingsRepository + SettingsRepositoryMut>(
+    repository: &R, board_name: String, modifier: String
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut board = repository.get_board(&board_name)?;
+
+    if let Some(padset_name) = board.modifier_pads.remove(&modifier) {
+        repository.delete_padset(&padset_name)?;
+        repository.set_board(board)?;
+        Ok(())
+    } else {
+        Err("This modifier pad set does not exist for the board".into())
+    }
+}
+
+pub struct ConvertToBoardChainUseCase<R: SettingsRepository + SettingsRepositoryMut> {
+    repository: Rc<R>,
+    board_name: String,
+}
+
+impl<R: SettingsRepository + SettingsRepositoryMut> ConvertToBoardChainUseCase<R> {
+    pub fn new(repository: Rc<R>, board_name: String) -> Self {
+        Self {
+            repository,
+            board_name,
+        }
+    }
+
+    pub fn convert(&self) -> Result<(), Box<dyn std::error::Error>> {
+        convert_to_board_chain(self.repository.as_ref(), self.board_name.clone())
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        self.validate_board_not_a_chain(&self.board_name)?;
+        self.validate_board_not_in_another_chain(&self.board_name)?;
+        Ok(())
+    }
+
+    fn validate_board_not_a_chain(&self, board_name: &String) -> Result<(), String> {
+        if let Ok(board) = self.repository.get_board(board_name) {
+            if matches!(board.board_type, BoardType::Chain(_)) {
+                return Err(format!("Board\n\"{}\"\nis already a Collection", board_name));
+            }
+        }
+        Ok(())
+    }
+
+
+    fn validate_board_not_in_another_chain(&self, board_name: &String) -> Result<(), String> {
+        for other_board_name in self.repository.boards().iter() {
+            if let Ok(other_board) = self.repository.get_board(other_board_name) {
+                if let BoardType::Chain(params) = &other_board.board_type {
+                    if params.boards().contains(board_name) {
+                        return Err(format!("Cannot convert\n\"{}\"\nas it is listed in\n\"{}\"", board_name, other_board.name));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+}
+
+pub fn convert_to_board_chain<R: SettingsRepository + SettingsRepositoryMut>(
+    repository: &R,
+    board_name: String
+) -> Result<(), Box<dyn std::error::Error>> {
+
+    let mut original_board = repository.get_board(&board_name)?;
+
+    match &original_board.board_type {
+        BoardType::Static=> {}
+        _ => { return Err("Only Static boards can be converted to BoardChain".into()); }
+    }
+
+    let renamed_board_name = format!("{}/stub", board_name);
+    repository.rename_board(&original_board.name, &renamed_board_name)?;
+
+    let mut renamed_board = repository.get_board(&renamed_board_name)?;
+    renamed_board.detection = Detection::None;
+
+    original_board.base_pads = None;
+    original_board.modifier_pads.clear();
+    original_board.text_style = None;
+    original_board.color_scheme = None;
+    original_board.board_type = BoardType::Chain(ChainParams {
+        boards: renamed_board_name.clone(),
+        initial_board: None,
+        params: vec![],
+    });
+
+    repository.set_board(renamed_board)?;
+    repository.insert_board(&renamed_board_name, original_board)?;
+
+    Ok(())
+}
+
+pub fn create_new_chain_with_board<R: SettingsRepository + SettingsRepositoryMut>(
+    repository: &R,
+    board_name: &String
+) -> Result<core::Board, Box<dyn std::error::Error>> {
+
+    let mut board = repository.get_board(&board_name)?;
+
+    match &board.board_type {
+        BoardType::Static=> {}
+        _ => { return Err("Only Static boards can be added to BoardChain".into()); }
+    }
+
+    let chain_params = ChainParams {
+        boards: board_name.clone(),
+        initial_board: board_name.clone().into(),
+        params: vec![],
+    };
+
+    board.detection = Detection::None;
+    board.name = format!("{}/chain", board_name);
+    board.base_pads = None;
+    board.modifier_pads.clear();
+    board.text_style = None;
+    board.color_scheme = None;
+    board.board_type = BoardType::Chain(chain_params);
+
+    repository.insert_board(&board_name, board.clone())?;
+
+    return repository.get_board(&board.name)
+}

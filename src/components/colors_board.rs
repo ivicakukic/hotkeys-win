@@ -3,12 +3,16 @@ use std::{cell::RefCell, rc::Rc};
 use windows::Win32::{Foundation::RECT, Graphics::Gdi::{DrawTextW, SelectObject, DT_CALCRECT, DT_NOPREFIX, HDC}, UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_C, VK_D, VK_DELETE, VK_DOWN, VK_E, VK_ESCAPE, VK_F2, VK_LEFT, VK_R, VK_RETURN, VK_RIGHT, VK_S, VK_UP}};
 
 use super::{
-    BoardComponent, ChildWindowRequest, DelegatingBoard, HasBoard, StringEditorBoard, UiEvent, UiEventHandler, UiEventResult,
-    apply_string, controls::{HSlider, NumericSpinnerPad, Tags},
+    BoardComponent, ChildWindowRequest, DelegatingBoard, HasBoard, UiEvent, UiEventHandler, UiEventResult, EnumAll, EnumTraversal,
+    apply_bool, apply_string, string_editor_board, yes_no_question_board,
+    HSlider, NumericSpinnerPad, Tags,
 };
 
 use crate::{
-    core::{self, SettingsRepository, SettingsRepositoryMut}, impl_board_component, impl_board_component_generic, impl_has_board, input::{ModifierState, TextCapture}, model::{Anchor, AnchorPin, Board, Color, ColorScheme, ColorSchemeHandle, Pad, PadId, PadSet, Tag, TextStyle}, ui::dialogs::open_color_picker
+    core::{self, SettingsRepository, SettingsRepositoryMut}, impl_board_component, impl_board_component_generic, impl_has_board,
+    input::{ModifierState},
+    model::{Anchor, AnchorPin, Board, Color, ColorScheme, ColorSchemeHandle, Pad, PadId, PadSet, Tag, TextStyle},
+    ui::dialogs::open_color_picker
 };
 
 
@@ -48,12 +52,16 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> ColorSchemeEditorB
                 UiEventResult::RequiresRedraw
             }
             VK_D | VK_DELETE => {
-                if let Ok(cs) = self.handle.as_data() {
-                    self.handle.move_next();
-                    self.repository.delete_color_scheme(&cs.name)
-                        .unwrap_or_else(|e| log::error!("Failed to delete color scheme: {}", e));
+                if let Ok(_) = self.handle.as_data() {
+                    return UiEventResult::PushState {
+                        board: Box::new(yes_no_question_board(
+                            format!("Delete\n\"{}\"?", self.handle.name()), self
+                        )),
+                        context: Box::new("Delete"),
+                    }
+                } else {
+                    return UiEventResult::NotHandled
                 }
-                UiEventResult::RequiresRedraw
             }
             VK_DOWN | VK_RETURN => {
                 let edit_board = EditModeBoard::new(self.repository.clone(), self.handle.as_data().unwrap());
@@ -64,15 +72,9 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> ColorSchemeEditorB
             }
             VK_R | VK_F2 => {
                 if let Ok(_) = self.handle.as_data() {
-                    let board_box = Box::new(StringEditorBoard {
-                        text_capture: TextCapture::new(self.title().into(), false),
-                        text_style: Some(self.text_style()),
-                        color_scheme: Some(self.color_scheme()),
-                        tags: vec![
-                            Tag { text: "Title".to_string(), anchor: Anchor::NW, color_idx: Some(0), ..Default::default() },
-                            Tags::EscEnter.default(),
-                        ],
-                    });
+                    let board_box = Box::new(string_editor_board(
+                        self.title(), self, "Title".to_string()
+                    ));
                     UiEventResult::PushState {
                         board: board_box,
                         context: Box::new("Title"),
@@ -133,7 +135,7 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> Board for ColorSch
         Box::new(vec![ EditModeBoard::<R>::preview_pad() ])
     }
 
-    fn tags(&self) -> Vec<Tag> {
+    fn tags(&self, _modifier: Option<ModifierState>) -> Vec<Tag> {
         vec![
             Tags::LeftRight.default(),
             Tags::EscEnter.default(),
@@ -153,9 +155,20 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> UiEventHandler for
     }
 
     fn handle_child_result(&mut self, context: Box<dyn std::any::Any>, result: Box<dyn std::any::Any>) -> UiEventResult {
-        if let Some(title) = context.downcast_ref::<&str>() {
-            if *title == "Title" {
+        if let Some(context) = context.downcast_ref::<&str>() {
+            if *context == "Title" {
                 return apply_string(result, |new_name| self.rename_color_scheme(new_name))
+            } else if *context == "Delete" {
+                return apply_bool(result, |confirm| {
+                    if confirm {
+                        if let Ok(cs) = self.handle.as_data() {
+                            self.handle.move_next();
+                            self.repository.delete_color_scheme(&cs.name)
+                                .unwrap_or_else(|e| log::error!("Failed to delete color scheme: {}", e));
+                        }
+                    }
+                    Ok(())
+                });
             }
         }
         UiEventResult::NotHandled
@@ -165,7 +178,7 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> UiEventHandler for
 impl_board_component_generic!(ColorSchemeEditorBoard<R>);
 
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum EditMode {
     Background,
     Opacity,
@@ -175,45 +188,22 @@ enum EditMode {
     Palette(i32),
 }
 
+impl EnumAll<EditMode> for EditMode {
+    fn all() -> Vec<EditMode> {
+        vec![
+            EditMode::Background,
+            EditMode::Opacity,
+            EditMode::Lines,
+            EditMode::Text,
+            EditMode::Tag,
+            EditMode::Palette(0),
+            EditMode::Palette(1),
+            EditMode::Palette(2),
+        ]
+    }
+}
+
 impl EditMode {
-    fn next(&self) -> Self {
-        match self {
-            EditMode::Background => EditMode::Opacity,
-            EditMode::Opacity => EditMode::Lines,
-            EditMode::Lines => EditMode::Text,
-            EditMode::Text => EditMode::Tag,
-            EditMode::Tag => EditMode::Palette(0),
-            EditMode::Palette(idx) if *idx < 2 => EditMode::Palette(idx + 1),
-            EditMode::Palette(_) => EditMode::Background,
-        }
-    }
-
-    fn prev(&self) -> Self {
-        match self {
-            EditMode::Background => EditMode::Palette(2),
-            EditMode::Opacity => EditMode::Background,
-            EditMode::Lines => EditMode::Opacity,
-            EditMode::Text => EditMode::Lines,
-            EditMode::Tag => EditMode::Text,
-            EditMode::Palette(idx) if *idx > 0 => EditMode::Palette(idx - 1),
-            EditMode::Palette(_) => EditMode::Tag,
-        }
-    }
-
-    fn index(&self) -> usize {
-        match self {
-            EditMode::Background => 0,
-            EditMode::Opacity => 1,
-            EditMode::Lines => 2,
-            EditMode::Text => 3,
-            EditMode::Tag => 4,
-            EditMode::Palette(0) => 5,
-            EditMode::Palette(1) => 6,
-            EditMode::Palette(2) => 7,
-            _ => unreachable!(),
-        }
-    }
-
 
     fn rows(&self, cs: &ColorScheme) -> Vec<TableRow> {
         let label = |mode| if *self == mode { "■■■■■■" } else { "■■■" };
@@ -407,7 +397,7 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> Board for EditMode
 
 
 
-    fn tags(&self) -> Vec<Tag> {
+    fn tags(&self, _modifier: Option<ModifierState>) -> Vec<Tag> {
         if self.inactive_menu || !self.is_dirty() {
             vec![
                 Tags::DownUp.default(),
@@ -436,7 +426,7 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> UiEventHandler for
                         if vk_code == VK_DOWN {
                             self.mode = self.mode.next();
                         } else {
-                            self.mode = self.mode.prev();
+                            self.mode = self.mode.previous();
                         }
                         UiEventResult::RequiresRedraw
                     }

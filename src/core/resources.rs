@@ -170,5 +170,5 @@ impl DetectedIcon {
 }
 
 pub fn slugify_process_name(process_name: &str) -> String {
-    process_name.to_lowercase().replace(".exe", "").replace(" ", "_").replace("-", "_")
+    process_name.to_lowercase().replace(".exe", "").replace(" ", "_").replace("-", "_").replace("+", "_")
 }

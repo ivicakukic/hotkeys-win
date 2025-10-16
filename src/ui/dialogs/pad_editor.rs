@@ -21,6 +21,7 @@ const ID_ADD_ACTION: u16 = 1006;
 const ID_DELETE_ACTION: u16 = 1007;
 const ID_UPDATE_ACTION: u16 = 1008;
 const ID_CAPTURE_SHORTCUT: u16 = 1009;
+const ID_BOARD_COMBO: u16 = 1010;
 const IDOK: u16 = 1;
 const IDCANCEL: u16 = 2;
 
@@ -35,10 +36,13 @@ struct PadEditor {
     hwnd: HWND,
     pad: Pad,
     actions: Vec<ActionType>, // Store actions separately for editing
+    focus_board_combo: bool,
     result: DialogResult,
     // Store final data after dialog closes
     final_header: String,
     final_text: String,
+    final_board: String,
+    boards: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -49,15 +53,18 @@ enum DialogResult {
 }
 
 impl PadEditor {
-    fn new(pad: Pad) -> Self {
+    fn new(pad: Pad, boards: Vec<String>, focus_board_combo: bool) -> Self {
         let actions = pad.actions().clone();
         Self {
             hwnd: HWND::default(),
             pad,
             actions,
+            boards,
+            focus_board_combo,
             result: DialogResult::None,
             final_header: String::new(),
             final_text: String::new(),
+            final_board: String::new(),
         }
     }
 
@@ -132,8 +139,18 @@ impl PadEditor {
             self.create_controls();
 
             // Set initial focus to first control
-            let first_control = GetNextDlgTabItem(self.hwnd, None, false);
-            if let Ok(control) = first_control {
+            // let first_control = GetNextDlgTabItem(self.hwnd, None, false);
+            // if let Ok(control) = first_control {
+            //     let _ = SetFocus(Some(control));
+            // }
+
+            // Set initial focus to board combo if requested else action value edit
+            let initial_focus = if self.focus_board_combo {
+                GetDlgItem(Some(self.hwnd), ID_BOARD_COMBO as _)
+            } else {
+                GetDlgItem(Some(self.hwnd), ID_ACTION_VALUE_EDIT as _)
+            };
+            if let Ok(control) = initial_focus {
                 let _ = SetFocus(Some(control));
             }
 
@@ -166,20 +183,14 @@ impl PadEditor {
                 if icon_str.is_empty() { None } else { Some(icon_str) }
             },
             actions: self.actions.clone(),
-            board: self.pad.board(),
+            board: if self.final_board.is_empty() { None } else { Some(self.final_board.clone()) },
             board_params: self.pad.board_params().clone(),
             color_scheme: self.pad.color_scheme.as_ref().map(|cs| cs.name.clone()),
             text_style: self.pad.text_style.as_ref().map(|ts| ts.name.clone()),
         };
 
         // Create new model pad
-        Pad::new(
-            self.pad.pad_id(),
-            core_pad,
-            self.pad.color_scheme.clone(),
-            self.pad.text_style.clone(),
-            self.pad.tags().clone(),
-        )
+        self.pad.clone().with_data(core_pad)
     }
 
     unsafe fn create_controls(&mut self) {
@@ -367,6 +378,45 @@ impl PadEditor {
             None,
         );
 
+        // Board combo
+        let _ = CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            w!("STATIC"),
+            w!("Open Board:"),
+            WS_CHILD | WS_VISIBLE,
+            10, 320, 100, 20,
+            Some(self.hwnd),
+            None,
+            Some(instance.into()),
+            None,
+        );
+
+        let combo = CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            w!("COMBOBOX"),
+            w!(""),
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(CBS_DROPDOWNLIST as _),
+            100, 315, 300, 200,
+            Some(self.hwnd),
+            Some(HMENU(ID_BOARD_COMBO as _)),
+            Some(instance.into()),
+            None,
+        ).unwrap();
+
+        // Add action types to combo
+        let mut boards = self.boards.clone();
+        boards.insert(0, "".to_string());
+        for board in boards {
+            let wide = to_wide_string(board.as_str());
+            SendMessageW(combo, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(wide.as_ptr() as _)));
+        }
+        let selected_index = match &self.pad.board() {
+            Some(board_name) => self.boards.iter().position(|b| b == board_name).map(|i| i + 1).unwrap_or(0),
+            None => 0,
+        };
+        SendMessageW(combo, CB_SETCURSEL, Some(WPARAM(selected_index)), Some(LPARAM(0)));
+
+
         // OK/Cancel buttons
         let _ = CreateWindowExW(
             WINDOW_EX_STYLE::default(),
@@ -520,6 +570,16 @@ impl PadEditor {
         // Save data while window is still valid
         self.final_header = get_window_text(GetDlgItem(Some(self.hwnd), ID_HEADER_EDIT as _).unwrap());
         self.final_text = backslash_n_to_newline(&get_window_text(GetDlgItem(Some(self.hwnd), ID_TEXT_EDIT as _).unwrap()));
+
+        let combo = GetDlgItem(Some(self.hwnd), ID_BOARD_COMBO as _).unwrap();
+        let sel = SendMessageW(combo, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0 as usize;
+        if sel == CB_ERR as usize {
+            self.final_board = String::new();
+        } else if sel == 0 {
+            self.final_board = String::new();
+        } else if sel - 1 < self.boards.len() {
+            self.final_board = self.boards[sel - 1].clone();
+        }
     }
 
     unsafe fn set_current_capture(&self, capture: Vec<capture::Combination>) {
@@ -576,6 +636,14 @@ impl PadEditor {
                 }
                 LRESULT(0)
             }
+            WM_CLOSE => {
+                let dialog = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut PadEditor;
+                if !dialog.is_null() {
+                    (*dialog).result = DialogResult::Cancel;
+                }
+                let _ = DestroyWindow(hwnd);
+                LRESULT(0)
+            }
             WM_KEYDOWN => {
                 let vk_code = wparam.0 as u16;
 
@@ -617,8 +685,8 @@ impl PadEditor {
 }
 
 
-pub fn open_pad_editor(pad: Pad, parent: Option<HWND>) -> Option<Pad> {
-    let mut editor = PadEditor::new(pad);
+pub fn open_pad_editor(pad: Pad, parent: Option<HWND>, boards: Vec<String>, focus_board_combo: bool) -> Option<Pad> {
+    let mut editor = PadEditor::new(pad, boards, focus_board_combo);
     let result = editor.show_modal(parent);
     if result == DialogResult::Ok {
         Some(editor.get_updated_pad())

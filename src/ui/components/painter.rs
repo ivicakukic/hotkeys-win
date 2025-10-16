@@ -236,7 +236,7 @@ impl<'a> BoardPainter<'a> {
         HeaderPainter { title: &self.board.title(), timeout: self.timeout, assets: &board_assets }
             .paint(hdc, &header_rect, self.board.icon(), pixels, width);
 
-        self.board.tags().iter().for_each(|tag| {
+        self.board.tags(Some(modifier_state)).iter().for_each(|tag| {
             TagPainter::draw_tag(hdc, tag, &header_rect, &board_assets, pixels, width);
         });
 
@@ -278,6 +278,10 @@ impl<'a> TilePainter<'a> {
 
             SelectObject(hdc, self.assets.tile_header_font().into());
 
+            if self.pad.disabled() {
+                SetTextColor(hdc, self.assets.font_disabled_color());
+            }
+
             // Header at top of tile
             let header_height = 60; // Enough space for 3 lines
             let mut header_rect = RECT{
@@ -292,7 +296,7 @@ impl<'a> TilePainter<'a> {
 
             // Apply alpha blending to header text
             let bg_color = self.assets.color_scheme().background().to_colorref();
-            let fg_color = self.assets.font_color();
+            let fg_color = if self.pad.disabled() { self.assets.font_disabled_color() } else { self.assets.font_color() };
             let bg_opacity = self.assets.color_scheme().opacity();
             alpha_blend_rect(pixels, width, &resize_rect(&header_rect, -2, -1), bg_color, fg_color, bg_opacity as f32);
 
@@ -302,8 +306,8 @@ impl<'a> TilePainter<'a> {
             DrawTextW(hdc, to_wstr(&self.pad.text()).as_mut_slice(), &mut text_size, DT_CALCRECT | DT_NOPREFIX);
 
             let content_rect = RECT {
-                left: rect.left,
-                right: rect.right,
+                left: rect.left + 20,
+                right: rect.right - 20,
                 top: rect.top + 25,        // 25px margin from top (header area)
                 bottom: rect.bottom - 25   // 25px margin from bottom (pad ID area)
             };
@@ -329,8 +333,8 @@ impl<'a> TilePainter<'a> {
             let gap = POINT { x: (content_rect.right - content_rect.left - text_size.right)/2,
                             y: (content_rect.bottom - content_rect.top - text_size.bottom)/2 };
             let mut text_rect = RECT {
-                left: content_rect.left + gap.x,
-                right: content_rect.right - gap.x,
+                left: content_rect.left, //  + gap.x,
+                right: content_rect.right, // - gap.x,
                 bottom: content_rect.bottom + icon_size - gap.y,
                 top: content_rect.top + icon_size + gap.y };
 
@@ -346,6 +350,7 @@ impl<'a> TilePainter<'a> {
             });
 
             SelectObject(hdc, previous_font);
+            SetTextColor(hdc, self.assets.font_color());
         }
     }
 }

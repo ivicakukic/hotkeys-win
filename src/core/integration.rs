@@ -54,7 +54,7 @@ pub trait Params {
     #[allow(dead_code)]
     fn get_param(&self, name: &str) -> Option<Param>;
     fn get_params(&self) -> Vec<Param>;
-    #[cfg(test)]
+    #[allow(dead_code)]
     fn get_param_as<T: std::str::FromStr>(&self, name: &str) -> Option<T> {
         self.get_param(name)
             .and_then(|p| p.value.parse::<T>().ok())
@@ -122,6 +122,7 @@ pub enum ActionType {
 pub enum BoardType {
     Static,
     Home,
+    Chain(ChainParams),
     Custom(BoardParams),
 }
 
@@ -153,8 +154,52 @@ impl Params for BoardParams {
     }
 }
 
- #[cfg(test)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ChainParams {
+    pub boards: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_board: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<Param>,
+}
 
+impl ChainParams {
+    pub fn boards(&self) -> Vec<String> {
+        self.boards.split(',').map(|s| s.trim().to_string()).collect()
+    }
+}
+
+impl Params for ChainParams {
+    fn get_params(&self) -> Vec<Param> {
+        vec![
+            Param::new("boards".to_string(), self.boards.clone()),
+            Param::new("initial_board".to_string(), self.initial_board.clone().unwrap_or_default()),
+        ].into_iter().chain(
+            self.params.clone().into_iter()
+        ).collect()
+    }
+    fn get_param(&self, name: &str) -> Option<Param> {
+        self.params.iter().find(|p| p.name == name).cloned()
+    }
+}
+
+impl From<Vec<Param>> for ChainParams {
+    fn from(params: Vec<Param>) -> Self {
+        let boards = params.get_param_as::<String>("boards")
+            .unwrap_or_default();
+        let initial = params.get_param_as::<String>("initial_board");
+        let other_params = params.into_iter()
+            .filter(|p| p.name != "boards" && p.name != "initial_board")
+            .collect::<Vec<Param>>();
+        Self {
+            boards,
+            initial_board: initial,
+            params: other_params,
+        }
+    }
+}
+
+ #[cfg(test)]
 mod tests {
 
     use super::*;

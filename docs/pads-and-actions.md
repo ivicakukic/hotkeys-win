@@ -598,7 +598,6 @@ Pads can be configured using the built-in pad editor or by manually editing the 
 
 The application includes a visual pad editor accessible from the board interface. However, some advanced features are currently only available through manual JSON editing:
 
-- Board navigation (`board` and `board_params` properties)
 - Pad-specific color schemes (`color_scheme` property)
 - Pad-specific text styles (`text_style` property)
 

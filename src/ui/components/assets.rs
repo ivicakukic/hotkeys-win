@@ -65,6 +65,10 @@ impl<'a> Assets<'a> {
         self.colors.get("tag_color").unwrap().clone()
     }
 
+    pub fn font_disabled_color(&self) -> COLORREF {
+        self.colors.get("font_disabled_color").unwrap().clone()
+    }
+
     pub fn tag_font(&self) -> HFONT {
         self.fonts.get("tag_font").unwrap().clone()
     }
@@ -135,6 +139,7 @@ impl<'a> Assets<'a> {
         self.colors.insert("line_color", colors.foreground1().to_colorref());
         self.colors.insert("font_color", colors.foreground2().to_colorref());
         self.colors.insert("tag_color", colors.tag_foreground().to_colorref());
+        self.colors.insert("font_disabled_color", colors.foreground2().equidistant(&colors.background()).to_colorref());
         for (i, _) in colors.palette().iter().enumerate() {
             self.colors.insert(palette_color_names[i], colors.palette_color(i).expect("Cannot fail").to_colorref());
         }

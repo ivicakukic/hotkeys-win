@@ -53,6 +53,7 @@ resources/
 | timeout| ✅| ❌| Timeout in seconds before the board auto-closes.|
 | feedback| ✅| ❌| Visual feedback delay for the pressed pad in milliseconds. |
 | editor| ✅| ❌| Path to text editor used for editing settings.|
+| natural_key_order| ✅| ❌| Whether to use natural key order for regular number keys.|
 | boards|  ✅| ✅| List of `Board` configuration objects.|
 | padsets|  ✅| ✅| List of `Padset` configuration objects.|
 | text_styles|  ✅| ✅| List of `TextStyle` configuration objects.|
@@ -124,6 +125,40 @@ Path to the text editor executable used for editing text actions and configurati
 
 ---
 
+## natural_key_order
+
+**Type:** `boolean`
+**Default:** `false`
+**Required:** No
+**Available in:** Main file only
+
+Determines the key mapping order when using regular number keys (not numpad keys). This setting allows you to choose between the traditional numpad layout and a more natural top-to-bottom layout.
+
+When set to `false` (default), the regular number keys map to pads using the same layout as the numeric keypad:
+```
+7 8 9
+4 5 6
+1 2 3
+```
+
+When set to `true`, the regular number keys map to pads in natural reading order from top to bottom:
+```
+1 2 3
+4 5 6
+7 8 9
+```
+
+**Note:** This setting only affects regular number keys. Numeric keypad keys always use the standard numpad layout.
+
+**Example:**
+```json
+{
+  "natural_key_order": true
+}
+```
+
+---
+
 ## includes
 
 **Type:** `array` of `string`
@@ -171,7 +206,42 @@ A board is the main UI element displayed when HotKeys is triggered. Each board c
 
 - **`"static"`** (default) - Regular board with fixed pads
 - **`"home"`** - Special board type that shows all available boards
+- **`{"chain": {...}}`** - Board collection that groups multiple boards with navigation
 - **`{"custom": {"type": "...", "params": [...]}}`** - Custom board type with parameters
+
+#### Chain Board Type
+
+Chain boards (also called collections) allow you to group multiple related boards together and navigate between them using arrow keys. This provides an alternative way to organize boards for applications that require many different shortcuts.
+
+**Chain board properties:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `boards` | `string` | ✅ | Comma-separated list of board names to include in the chain |
+| `initial_board` | `string` | ❌ | Name of the board to show first when the chain is activated (defaults to first board in list) |
+| `params` | `array` | ❌ | Additional parameters for the chain |
+
+When a chain board is active, the UI displays pagination information (e.g., "◁ 1/3 ▷") and users can navigate between boards using the left and right arrow keys.
+
+**Example:**
+```json
+{
+  "kind": {
+    "chain": {
+      "boards": "code/main,code/view-find,code/panel",
+      "initial_board": "code/main"
+    }
+  },
+  "name": "code",
+  "title": "VS Code",
+  "icon": "mine/vscode.png",
+  "detection": {
+    "win32": "code"
+  }
+}
+```
+
+In this example, when VS Code is active and the HotKeys board is triggered, it will show the "code/main" board first. Users can press the left/right arrow keys to navigate to the other boards in the collection ("code/view-find" and "code/panel").
 
 ### Detection
 

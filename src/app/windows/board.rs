@@ -9,7 +9,7 @@ use windows::{
         Graphics::Gdi::{InvalidateRect, HBRUSH},
         System::LibraryLoader::GetModuleHandleW,
         UI::{
-            Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_ESCAPE, VK_NUMPAD0},
+            Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_ESCAPE},
             WindowsAndMessaging::{
                 CreateWindowExW, DefWindowProcW, DestroyWindow, KillTimer, LoadCursorW, LoadIconW, PostMessageW, RegisterClassW, SetTimer, ShowWindow, IDC_ARROW, SW_SHOW, WM_CLOSE, WM_CREATE, WM_DESTROY, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MOVE, WM_PAINT, WM_RBUTTONDOWN, WM_SIZE, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WM_USER, WNDCLASSW
             }
@@ -19,12 +19,7 @@ use windows::{
 
 
 use crate::{
-    input::{ModifierHandler, ModifierState},
-    components::{BoardComponent, ChildWindowRequest, Direction, KeyboardEvent, MouseEvent, MouseEventTarget, SetWindowPosCommand, UiEvent, UiEventResult},
-    framework::{wnd_proc_router, Window},
-    model::{PadId},
-    ui::components::painter,
-    ui::shared::{ layout::WindowLayout, utils::{reset_window_pos, set_window_rect}}
+    components::{BoardComponent, ChildWindowRequest, Direction, KeyboardEvent, MouseEvent, MouseEventTarget, PadMapping, SetWindowPosCommand, UiEvent, UiEventResult}, core::SettingsRepository, framework::{wnd_proc_router, Window}, input::{ModifierHandler, ModifierState}, model::PadId, ui::{components::painter, shared::{ layout::WindowLayout, utils::{reset_window_pos, set_window_rect}}}
 };
 
 pub const WM_BOARD_COMMAND:u32 = WM_USER + 20;
@@ -38,17 +33,18 @@ const ID_TIMER_FEEDBACK: usize = 2;
 static REGISTER_WINDOW_CLASS: Once = Once::new();
 static WINDOW_CLASS_NAME: &HSTRING = h!("HotKeys.Window");
 
-pub struct BoardWindow {
+pub struct BoardWindow<R: SettingsRepository> {
     hwnd: HWND,
     layout: WindowLayout,
     board: Box<dyn BoardComponent>,
     timeout: u32,
     feedback: u64,
+    pad_mapping: PadMapping<R>,
     selected_pad: Option<PadId>,
     modifier_state: ModifierState,
 }
 
-impl BoardWindow {
+impl<R: SettingsRepository> BoardWindow<R> {
 
     fn register_window_class(hinstance: HMODULE) {
         REGISTER_WINDOW_CLASS.call_once(|| {
@@ -71,7 +67,8 @@ impl BoardWindow {
         board: Box<dyn BoardComponent>,
         timeout: u32,
         feedback: u64,
-    ) -> Result<Box<BoardWindow>> {
+        pad_mapping: PadMapping<R>,
+    ) -> Result<Box<BoardWindow<R>>> {
 
         let hinstance = unsafe { GetModuleHandleW(None)? };
         Self::register_window_class(hinstance);
@@ -88,6 +85,7 @@ impl BoardWindow {
             feedback: feedback,
             selected_pad: None,
             modifier_state: ModifierState::default(),
+            pad_mapping: pad_mapping,
         });
 
 
@@ -324,6 +322,10 @@ impl BoardWindow {
                 UiEventResult::PadSelected(pad_id) => {
                     return self.on_pad_selected(pad_id, hwnd)
                 }
+                UiEventResult::CloseWindow => {
+                    self.post_board_finished_msg(hwnd);
+                    return LRESULT(0);
+                }
                 UiEventResult::SetWindowPos(command) => {
                     return self.move_or_size(hwnd, command)
                 },
@@ -345,13 +347,11 @@ impl BoardWindow {
         }
 
         // Handle numeric pad keys
-        let pad_id = wparam.0 as i32 - VK_NUMPAD0.0 as i32;
-        if pad_id < 1 || pad_id > 9 {
-            return LRESULT(0); // Ignore other keys
+        let pad_id = self.pad_mapping.map(vk_code);
+        match pad_id {
+            None => LRESULT(0), // Unhandled key
+            Some(pad_id) => self.on_pad_selected(pad_id, hwnd)
         }
-
-        let pad_id = PadId::from_keypad_int(pad_id);
-        self.on_pad_selected(pad_id, hwnd)
     }
 
     fn on_keyup(&mut self, hwnd: HWND, wparam: WPARAM) -> LRESULT {
@@ -398,9 +398,17 @@ impl BoardWindow {
                         self.invalidate(hwnd);
                         return LRESULT(0)
                     },
+                    UiEventResult::CloseWindow => {
+                        self.post_board_finished_msg(hwnd);
+                        return LRESULT(0);
+                    },
                     UiEventResult::PadSelected(pad_id) => {
                         return self.on_pad_selected(pad_id, hwnd)
                     }
+                    UiEventResult::RequestChildWindow(child_request) => {
+                        self.post_child_window_message(hwnd, child_request);
+                        return LRESULT(0)
+                    },
                     UiEventResult::NotHandled => {
                         match target {
                             MouseEventTarget::Pad(pad_id) => {
@@ -584,7 +592,7 @@ impl BoardWindow {
 
 }
 
-impl Window for BoardWindow {
+impl<R: SettingsRepository> Window for BoardWindow<R> {
     fn set_hwnd(&mut self, hwnd: HWND) {
         self.hwnd = hwnd;
     }

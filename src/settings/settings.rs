@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use crate::core::data::{Board, ColorScheme, Detection, PadSet, TextStyle};
 use crate::core::repository::{SettingsRepository, SettingsRepositoryMut};
-use crate::core::Resources;
+use crate::core::{Resources};
 
 use super::persistence::{SettingsData, SettingsFileStroage, LayoutSettings};
 use crate::core::data::{HOME_BOARD_NAME};
@@ -49,7 +49,6 @@ impl Settings {
     pub fn detections(&self) -> Vec<Detection> {
         self.data.borrow().boards.iter()
             .map(|b| b.detection.clone())
-            // filter only Detection::Win32
             .filter(|d| d != &Detection::None)
             .collect()
     }
@@ -100,6 +99,10 @@ impl SettingsRepository for Settings {
     }
     fn editor(&self) -> String {
         self.data.borrow().editor.clone()
+    }
+
+    fn natural_key_order(&self) -> bool {
+        self.data.borrow().natural_key_order
     }
 
     fn get_text_style(&self, name: &str) -> Option<TextStyle> {
@@ -158,6 +161,9 @@ impl SettingsRepository for Settings {
     fn boards(&self) -> Vec<String> {
         self.data.borrow().boards.iter().map(|b| b.name.clone()).collect()
     }
+    fn padsets(&self) -> Vec<String> {
+        self.data.borrow().padsets.iter().map(|ps| ps.name.clone()).collect()
+    }
 
 }
 
@@ -170,6 +176,20 @@ impl SettingsRepositoryMut for Settings {
             return Err(format!("Board '{}' already exists", board.name).into());
         }
         data.boards.push(board);
+        self.mark_dirty();
+        Ok(())
+    }
+
+    fn insert_board(&self, insert_before: &str, board: Board) -> Result<(), Box<dyn std::error::Error>> {
+        let mut data = self.data.borrow_mut();
+        if data.boards.iter().any(|b| b.name == board.name) {
+            return Err(format!("Board '{}' already exists", board.name).into());
+        }
+        if let Some(pos) = data.boards.iter().position(|b| b.name == insert_before) {
+            data.boards.insert(pos, board);
+        } else {
+            data.boards.push(board);
+        }
         self.mark_dirty();
         Ok(())
     }
@@ -223,6 +243,81 @@ impl SettingsRepositoryMut for Settings {
             Ok(())
         } else {
             Err(format!("TextStyle '{}' not found", name).into())
+        }
+    }
+
+    fn delete_board(&self, name: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut data = self.data.borrow_mut();
+
+        // // Check for references in PadSets (pad.board - board navigation)
+        // let first_dependent_padset = data.padsets.iter()
+        //     .find(|ps| ps.items.iter()
+        //         .any(|p| p.board.as_ref().map_or(false, |b| b == name))
+        //     )
+        //     .map(|ps| ps.name.clone());
+
+        // match first_dependent_padset {
+        //     Some(ref padset_name) => {
+        //         if !cascade {
+        //             return Err(format!("Board '{}' is referenced by PadSet '{}'", name, padset_name).into());
+        //         } else {
+        //             // Remove references to the board in all padsets
+        //             data.padsets.iter_mut().for_each(|ps| {
+        //                 ps.items.iter_mut().for_each(|p| {
+        //                     if p.board.as_ref().map_or(false, |b| b == name) {
+        //                         p.board = None;
+        //                     }
+        //                 });
+        //             });
+        //         }
+        //     },
+        //     _ => {}
+        // }
+
+        // // Check for references in chain boards
+        // let first_dependent_chain_board = data.boards.iter()
+        //     .find(|b| {
+        //         if let BoardType::Chain(params) = &b.board_type {
+        //             params.boards().contains(&name.to_string())
+        //         } else {
+        //             false
+        //         }
+        //     })
+        //     .map(|b| b.name.clone());
+
+        // match first_dependent_chain_board {
+        //     Some(ref board_name) => {
+        //         if !cascade {
+        //             return Err(format!("Board '{}' is listed in Collection '{}'", name, board_name).into());
+        //         } else {
+        //             // Remove references to the board in all chain boards
+        //             data.boards.iter_mut().for_each(|b| {
+        //                 if let BoardType::Chain(params) = &mut b.board_type {
+        //                     params.remove_board(name);
+        //                 }
+        //             });
+        //         }
+        //     },
+        //     _ => {}
+        // }
+
+        if let Some(pos) = data.boards.iter().position(|b| b.name == name) {
+            data.boards.remove(pos);
+            self.mark_dirty();
+            Ok(())
+        } else {
+            Err(format!("Board '{}' not found", name).into())
+        }
+    }
+
+    fn delete_padset(&self, name: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut data = self.data.borrow_mut();
+        if let Some(pos) = data.padsets.iter().position(|ps| ps.name == name) {
+            data.padsets.remove(pos);
+            self.mark_dirty();
+            Ok(())
+        } else {
+            Err(format!("PadSet '{}' not found", name).into())
         }
     }
 
@@ -332,6 +427,34 @@ impl SettingsRepositoryMut for Settings {
             Ok(())
         } else {
             Err(format!("TextStyle '{}' not found", old_name).into())
+        }
+    }
+
+    fn rename_board(&self, old_name: &str, new_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut data = self.data.borrow_mut();
+        if data.boards.iter().any(|b| b.name == new_name) {
+            return Err(format!("Board '{}' already exists", new_name).into());
+        }
+        if let Some(existing) = data.boards.iter_mut().find(|b| b.name == old_name) {
+
+            existing.name = new_name.to_string();
+            existing.base_pads = existing.base_pads.clone().or(Some(old_name.to_string()));
+
+            // Update references to this board in all pads globally
+            for padset in &mut data.padsets {
+                for pad in &mut padset.items {
+                    if let Some(ref mut board_name) = pad.board {
+                        if board_name == old_name {
+                            *board_name = new_name.to_string();
+                        }
+                    }
+                }
+            }
+
+            self.mark_dirty();
+            Ok(())
+        } else {
+            Err(format!("Board '{}' not found", old_name).into())
         }
     }
 

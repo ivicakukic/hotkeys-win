@@ -7,7 +7,7 @@ const DEFAULT_SCHEME: &str = "default";
 const DEFAULT_TEXT_STYLE: &str = "default";
 const DEFAULT_OPACITY: f64 = 0.80;
 const DEFAULT_BACKGROUND: &str = "#00007f";
-const DEFAULT_FOREGROUND1: &str = "#9494d9";
+const DEFAULT_FOREGROUND1: &str = "#6464b4";
 const DEFAULT_FOREGROUND2: &str = "#dbdbec";
 const DEFAULT_TAG_COLOR: &str = "#dbdbec";
 
@@ -239,6 +239,10 @@ impl Board {
             }
         }
         self.base_pads.as_deref()
+    }
+
+    pub fn has_modifier(&self, modifier: &str) -> bool {
+        return self.modifier_pads.get(modifier).is_some()
     }
 
 }

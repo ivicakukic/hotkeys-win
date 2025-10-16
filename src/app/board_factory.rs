@@ -6,6 +6,7 @@ use crate::components::{ BoardComponent, HomeBoard, MainBoard, SettingsBoard, St
 
 pub struct BoardRuntimeContext<R: SettingsRepository + SettingsRepositoryMut> {
     pub repository: Rc<R>,
+    pub resources: Resources,
 }
 
 pub trait BoardFactory<R: SettingsRepository + SettingsRepositoryMut> {
@@ -53,10 +54,11 @@ impl<'a, R: SettingsRepository + SettingsRepositoryMut + 'static> BoardFactoryIm
 
     pub fn create_board(&self, name: &str, dynamic_params: Vec<Param>) -> Result<Box<dyn BoardComponent>, Box<dyn std::error::Error>> {
         let board = self.repository.get_board(name)?;
-        let context = BoardRuntimeContext { repository: self.repository.clone() };
+        let context = BoardRuntimeContext { repository: self.repository.clone(), resources: self.resources.clone() };
         match &board.board_type {
-            BoardType::Static => create_main_board(&context, &board, dynamic_params, self.resources.clone()),
-            BoardType::Home => create_home_board(&context, &board, dynamic_params, self.resources.clone()),
+            BoardType::Static => create_main_board(&context, &board, dynamic_params),
+            BoardType::Home => create_home_board(&context, &board, dynamic_params),
+            BoardType::Chain(params) => create_board_chain(&context, params.merge_params(dynamic_params).into()),
             BoardType::Custom(params) => {
                 match self.registry.get_factory(&params.board_type) {
                     Some(factory) => factory.create_board(&context, &board, params.merge_params(dynamic_params)),
@@ -71,8 +73,7 @@ impl<'a, R: SettingsRepository + SettingsRepositoryMut + 'static> BoardFactoryIm
 fn create_home_board<R: SettingsRepository + SettingsRepositoryMut + 'static>(
     context: &BoardRuntimeContext<R>,
     board: &crate::core::Board,
-    params: Vec<Param>,
-    resources: Resources
+    params: Vec<Param>
 ) -> Result<Box<dyn BoardComponent>, Box<dyn std::error::Error>> {
 
     if board.name == "settings" {
@@ -83,7 +84,7 @@ fn create_home_board<R: SettingsRepository + SettingsRepositoryMut + 'static>(
                         SettingsBoard::new(
                             board.clone(),
                             params,
-                            resources,
+                            context.resources.clone(),
                             context.repository.clone(),
                         )
                     )
@@ -98,7 +99,7 @@ fn create_home_board<R: SettingsRepository + SettingsRepositoryMut + 'static>(
                         HomeBoard::new(
                             board.clone(),
                             params,
-                            resources,
+                            context.resources.clone(),
                             context.repository.clone(),
                         )
                     )
@@ -114,7 +115,6 @@ fn create_main_board<R: SettingsRepository + SettingsRepositoryMut + 'static>(
     context: &BoardRuntimeContext<R>,
     board: &crate::core::Board,
     params: Vec<Param>,
-    resources: Resources
 ) -> Result<Box<dyn BoardComponent>, Box<dyn std::error::Error>> {
 
     Ok(
@@ -124,7 +124,31 @@ fn create_main_board<R: SettingsRepository + SettingsRepositoryMut + 'static>(
                     MainBoard::new(
                         board.name.clone(),
                         params,
-                        resources,
+                        context.resources.clone(),
+                        context.repository.clone()
+                    )
+                )
+            )
+        )
+    )
+}
+
+
+
+fn create_board_chain<R: SettingsRepository + SettingsRepositoryMut + 'static>(
+    context: &BoardRuntimeContext<R>,
+    dynamic_params: crate::core::integration::ChainParams
+) -> Result<Box<dyn BoardComponent>, Box<dyn std::error::Error>> {
+
+    Ok(
+        Box::new(
+            StateMachineBoard::new(
+                Box::new(
+                    crate::components::BoardChain::new(
+                        dynamic_params.boards(),
+                        dynamic_params.initial_board,
+                        dynamic_params.params,
+                        context.resources.clone(),
                         context.repository.clone()
                     )
                 )

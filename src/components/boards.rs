@@ -1,13 +1,13 @@
 use std::rc::Rc;
 
 use windows::Win32::Foundation::{HWND, WPARAM};
-use windows::Win32::UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_ESCAPE, VK_RETURN};
+use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
-use crate::core::{SettingsRepository, SettingsRepositoryMut};
+use crate::core::{self, SettingsRepository, SettingsRepositoryMut};
 use crate::input::{ModifierState, TextCapture};
-use crate::model::{Anchor, Board, BoardHandle, ColorScheme, Pad, PadSet, Tag, TextStyle};
+use crate::model::{Anchor, Board, BoardHandle, ColorScheme, Pad, PadId, PadSet, Tag, TextStyle};
 
-use super::{BoardComponent, UiEvent, UiEventHandler, UiEventResult, SetWindowPosCommand as Command, Direction, ChildWindowRequest, state_machine::BoardStateMachine};
+use super::{BoardComponent, UiEvent, UiEventHandler, UiEventResult, SetWindowPosCommand as Command, Direction, ChildWindowRequest, Tags, state_machine::BoardStateMachine};
 
 
 
@@ -75,8 +75,8 @@ pub trait DelegatingBoard: HasBoard {
     fn delegate_padset(&self, modifier: Option<ModifierState>) -> Box<dyn PadSet> {
         self.board().padset(modifier)
     }
-    fn delegate_tags(&self) -> Vec<Tag> {
-        self.board().tags()
+    fn delegate_tags(&self, modifier: Option<ModifierState>) -> Vec<Tag> {
+        self.board().tags(modifier)
     }
 }
 
@@ -99,11 +99,57 @@ impl<T: DelegatingBoard> Board for T {
     fn padset(&self, modifier: Option<ModifierState>) -> Box<dyn PadSet> {
         self.delegate_padset(modifier)
     }
-    fn tags(&self) -> Vec<Tag> {
-        self.delegate_tags()
+    fn tags(&self, modifier: Option<ModifierState>) -> Vec<Tag> {
+        self.delegate_tags(modifier)
     }
 }
 
+
+pub trait HasHandler {
+    fn handler(&mut self) -> Option<&mut dyn UiEventHandler>;
+}
+
+pub trait DelegatingHandler: HasHandler {
+    fn delegate_handle_ui_event(&mut self, event: UiEvent) -> UiEventResult {
+        match self.handler() {
+            Some(handler) => handler.handle_ui_event(event),
+            None => UiEventResult::NotHandled
+        }
+    }
+    fn delegate_activate(&mut self) -> UiEventResult {
+        match self.handler() {
+            Some(handler) => handler.activate(),
+            None => UiEventResult::NotHandled
+        }
+    }
+    fn delegate_create_child_window(&mut self, request: ChildWindowRequest, parent_hwnd: HWND) -> UiEventResult {
+        match self.handler() {
+            Some(handler) => handler.create_child_window(request, parent_hwnd),
+            None => UiEventResult::NotHandled
+        }
+    }
+    fn delegate_handle_child_result(&mut self, context: Box<dyn std::any::Any>, result: Box<dyn std::any::Any>) -> UiEventResult {
+        match self.handler() {
+            Some(handler) => handler.handle_child_result(context, result),
+            None => UiEventResult::NotHandled
+        }
+    }
+}
+
+impl<T: DelegatingHandler> UiEventHandler for T {
+    fn handle_ui_event(&mut self, event: UiEvent) -> UiEventResult {
+        self.delegate_handle_ui_event(event)
+    }
+    fn activate(&mut self) -> UiEventResult {
+        self.delegate_activate()
+    }
+    fn create_child_window(&mut self, request: ChildWindowRequest, parent_hwnd: HWND) -> UiEventResult {
+        self.delegate_create_child_window(request, parent_hwnd)
+    }
+    fn handle_child_result(&mut self, context: Box<dyn std::any::Any>, result: Box<dyn std::any::Any>) -> UiEventResult {
+        self.delegate_handle_child_result(context, result)
+    }
+}
 
 /// StateMachineBoard - a BoardComponent implementation delegating to an internal BoardStateMachine
 
@@ -171,10 +217,9 @@ impl Board for StateMachineBoard {
         self.state_machine.current_board_ref().data().padset(modifier)
     }
 
-    fn tags(&self) -> Vec<Tag> {
-        self.state_machine.current_board_ref().data().tags()
+    fn tags(&self, modifier: Option<ModifierState>) -> Vec<Tag> {
+        self.state_machine.current_board_ref().data().tags(modifier)
     }
-
 }
 
 impl UiEventHandler for StateMachineBoard {
@@ -270,7 +315,7 @@ impl<R: SettingsRepository + SettingsRepositoryMut> Board for SimpleBoard<R> {
         Box::new(vec![] as Vec<Pad>)
     }
 
-    fn tags(&self) -> Vec<Tag> {
+    fn tags(&self, _modifier: Option<ModifierState>) -> Vec<Tag> {
         std::vec![]
     }
 }
@@ -317,7 +362,7 @@ impl Board for StringEditorBoard {
 
         ] as Vec<Pad>)
     }
-    fn tags(&self) -> Vec<Tag> {
+    fn tags(&self, _modifier: Option<ModifierState>) -> Vec<Tag> {
         self.tags.clone()
     }
 }
@@ -352,6 +397,180 @@ impl UiEventHandler for StringEditorBoard {
 
 impl_board_component!(StringEditorBoard);
 
+pub fn string_editor_board(initial_text: String, board: &dyn BoardComponent, tag: String) -> StringEditorBoard {
+    let data = board.data();
+    StringEditorBoard {
+        text_capture: TextCapture::new(Some(initial_text), false),
+        color_scheme: Some(data.color_scheme()),
+        text_style: Some(data.text_style()),
+        tags: vec![
+            Tag { text: tag, anchor: Anchor::NW, color_idx: Some(0), ..Default::default() },
+            Tags::EscEnter.default(),
+        ],
+    }
+}
+
+
+/// YesNoBoard - a simple Yes/No confirmation board component
+/// Returns true for Yes, false for No
+pub struct YesNoBoard {
+    pub message: String,
+    pub color_scheme: Option<ColorScheme>,
+    pub text_style: Option<TextStyle>,
+    pub icon: Option<String>,
+}
+
+impl YesNoBoard {
+    pub fn new(message: String, color_scheme: Option<ColorScheme>, text_style: Option<TextStyle>, icon: Option<String>) -> Self {
+        Self {
+            message,
+            color_scheme,
+            text_style,
+            icon
+        }
+    }
+}
+
+impl Board for YesNoBoard {
+    fn name(&self) -> String {
+        "YesNoBoard".to_string()
+    }
+    fn title(&self) -> String {
+        "Confirm".to_string()
+    }
+    fn icon(&self) -> Option<String> {
+        self.icon.clone()
+    }
+    fn color_scheme(&self) -> ColorScheme {
+        self.color_scheme.clone().unwrap_or_default()
+    }
+    fn text_style(&self) -> TextStyle {
+        self.text_style.clone().unwrap_or_default()
+    }
+    fn padset(&self, _: Option<ModifierState>) -> Box<dyn PadSet> {
+        Box::new(vec![
+            PadId::Five.with_data(core::Pad {
+                text: Some(self.message.clone()),
+                ..Default::default()
+            }).with_tags(vec![
+                Tags::RightBlack.tag(Anchor::W),
+                Tags::LeftBlack.tag(Anchor::E),
+                Tag { text: "esc(N)".to_string(), anchor: Anchor::NW, font_idx: Some(0), ..Default::default() },
+                Tag { text: "enter(Y)".to_string(), anchor: Anchor::NE, font_idx: Some(0), ..Default::default() }
+            ])
+        ])
+    }
+    fn tags(&self, _modifier: Option<ModifierState>) -> Vec<Tag> {
+        vec![]
+    }
+}
+
+impl UiEventHandler for YesNoBoard {
+    fn handle_ui_event(&mut self, event: UiEvent) -> UiEventResult {
+        match event {
+            UiEvent::KeyDown(key_event) => {
+                let vk_code = VIRTUAL_KEY(key_event.key as u16);
+                if vk_code == VK_RETURN || vk_code == VK_Y {
+                    UiEventResult::PopState { result: Box::new(true) }
+                } else if vk_code == VK_ESCAPE || vk_code == VK_N {
+                    UiEventResult::PopState { result: Box::new(false) }
+                } else {
+                    UiEventResult::NotHandled
+                }
+            }
+            UiEvent::RightMouseDown(_) => UiEventResult::Handled, // Ignore mouse clicks here
+            _ => UiEventResult::NotHandled,
+        }
+    }
+}
+
+impl_board_component!(YesNoBoard);
+
+pub fn yes_no_question_board(message: String, board: &dyn BoardComponent) -> YesNoBoard {
+    YesNoBoard::new(message, Some(board.data().color_scheme()), Some(board.data().text_style()), Some("question.svg".to_string()))
+}
+
+pub fn yes_no_warning_board(message: String, board: &dyn BoardComponent) -> YesNoBoard {
+    YesNoBoard::new(message, Some(board.data().color_scheme()), Some(board.data().text_style()), Some("warning.svg".to_string()))
+}
+
+/// MessageBoard - a simple message display board component
+/// Returns () on any key press
+pub struct MessageBoard {
+    pub title: Option<String>,
+    pub message: String,
+    pub color_scheme: Option<ColorScheme>,
+    pub text_style: Option<TextStyle>,
+    pub icon: Option<String>,
+}
+
+impl MessageBoard {
+    pub fn new(title: Option<String>, message: String, color_scheme: Option<ColorScheme>, text_style: Option<TextStyle>, icon: Option<String>) -> Self {
+        Self {
+            title,
+            message,
+            color_scheme,
+            text_style,
+            icon,
+        }
+    }
+}
+
+impl Board for MessageBoard {
+    fn name(&self) -> String {
+        "MessageBoard".to_string()
+    }
+    fn title(&self) -> String {
+        self.title.clone().unwrap_or_else(|| "Message".to_string())
+    }
+    fn icon(&self) -> Option<String> {
+        self.icon.clone()
+    }
+    fn color_scheme(&self) -> ColorScheme {
+        self.color_scheme.clone().unwrap_or_default()
+    }
+    fn text_style(&self) -> TextStyle {
+        self.text_style.clone().unwrap_or_default()
+    }
+    fn padset(&self, _: Option<ModifierState>) -> Box<dyn PadSet> {
+        Box::new(vec![
+            PadId::Five.with_data(core::Pad {
+                text: Some(self.message.clone()),
+                ..Default::default()
+            }).with_tags(vec![
+                Tags::RightBlack.tag(Anchor::W),
+                Tags::LeftBlack.tag(Anchor::E)
+            ])
+        ])
+    }
+    fn tags(&self, _modifier: Option<ModifierState>) -> Vec<Tag> {
+        vec![]
+    }
+}
+
+
+impl UiEventHandler for MessageBoard {
+    fn handle_ui_event(&mut self, event: UiEvent) -> UiEventResult {
+        match event {
+            UiEvent::KeyDown(_) => {
+                UiEventResult::PopState { result: Box::new(()) }
+            }
+            _ => UiEventResult::NotHandled,
+        }
+    }
+}
+
+impl_board_component!(MessageBoard);
+
+pub fn error_board(message: String, board: &dyn BoardComponent) -> MessageBoard {
+    MessageBoard::new(Some("Error".to_string()), message, Some(board.data().color_scheme()), Some(board.data().text_style()), Some("error.svg".to_string()))
+}
+
+pub fn success_board(message: String, board: &dyn BoardComponent) -> MessageBoard {
+    MessageBoard::new(Some("Success".to_string()), message, Some(board.data().color_scheme()), Some(board.data().text_style()), Some("info.svg".to_string()))
+}
+
+/// LayoutBoard - a board for moving/resizing windows with keyboard
 
 pub enum LayoutAction {
     Move,
@@ -439,10 +658,10 @@ impl LayoutBoard {
 }
 
 impl DelegatingBoard for LayoutBoard {
-    fn delegate_tags(&self) -> Vec<Tag> {
+    fn delegate_tags(&self, _modifier: Option<ModifierState>) -> Vec<Tag> {
         let mut tags =vec![
             Tag{ text: format!("{} window", self.mode.as_str()), anchor: Anchor::NW, color_idx: Some(0), ..Default::default() },
-            Tag{ text: format!("x: {}, esc/enter", self.mode.as_str().to_lowercase()), anchor: Anchor::SW, font_idx: Some(1), color_idx: None, ..Default::default() },
+            Tag{ text: format!("x: {}, esc/enter", self.mode.toggle().as_str().to_lowercase()), anchor: Anchor::SW, font_idx: Some(1), color_idx: None, ..Default::default() },
         ];
         tags.extend(vec![
             Tag{ text: " △ ".to_string(), anchor: Anchor::NE, font_idx: Some(3), ..Default::default() },

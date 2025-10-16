@@ -161,8 +161,11 @@ fn run() -> Result<()> {
             eprintln!("Error: Failed to load settings: {}", e);
             Error::from_hresult(windows::Win32::Foundation::E_FAIL)
         })?;
-    let action_factory_registry = ActionFactoryRegistry::<Settings>::new();
-    let board_factory_registry = BoardFactoryRegistry::<Settings>::new();
+
+    #[allow(unused_mut)]
+    let mut action_factory_registry = ActionFactoryRegistry::<Settings>::new();
+    #[allow(unused_mut)]
+    let mut board_factory_registry = BoardFactoryRegistry::<Settings>::new();
 
     // Register custom factories
     // action_factory_registry.register_factory(...);

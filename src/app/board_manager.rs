@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::{
-    components::BoardComponent,
+    components::{BoardComponent, PadMapping},
     settings::{LayoutSettings, Settings},
     ui::shared::layout::{Rect, WindowLayout, WindowStyle}
 };
@@ -9,7 +9,7 @@ use crate::{
 use super::windows::BoardWindow;
 
 pub struct BoardManager {
-    pub board: Option<Box<BoardWindow>>,
+    pub board: Option<Box<BoardWindow<Settings>>>,
     pub settings: Rc<Settings>,
 }
 
@@ -37,7 +37,8 @@ impl BoardManager {
             self.layout(),
             board,
             timeout,
-            feedback
+            feedback,
+            PadMapping::new(self.settings.clone())
         ).unwrap());
     }
 

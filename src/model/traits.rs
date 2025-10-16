@@ -19,10 +19,9 @@ pub trait Board {
         Box::new(vec![] as Vec<Pad>)
     }
 
-    fn tags(&self) -> Vec<Tag> {
+    fn tags(&self, _modifier: Option<ModifierState>) -> Vec<Tag> {
         vec![]
     }
-
 }
 
 pub trait PadSet {

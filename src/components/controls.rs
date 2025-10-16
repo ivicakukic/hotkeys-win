@@ -224,6 +224,7 @@ pub enum Tags {
     DownWhite,
     DownUp,
     LeftRight,
+    LeftTextRight(String),
     EscEnter,
 }
 
@@ -240,6 +241,7 @@ impl Tags {
             Tags::DownWhite => "▽".to_string(),
             Tags::DownUp => "▽△".to_string(),
             Tags::LeftRight => "◁▷".to_string(),
+            Tags::LeftTextRight(text) => format!("◁ {} ▷", text),
             Tags::EscEnter => "esc/enter".to_string(),
         }
     }
@@ -256,7 +258,8 @@ impl Tags {
             Tags::DownWhite => Tag { text: self.to_string(), anchor: Anchor::N, font_idx: Some(2), color_idx: None, ..Default::default() },
             Tags::DownUp => Tag { text: self.to_string(), anchor: Anchor::SE, font_idx: Some(2), color_idx: None, ..Default::default() },
             Tags::LeftRight => Tag { text: self.to_string(), anchor: Anchor::SE, font_idx: Some(2), color_idx: None, ..Default::default() },
-            Tags::EscEnter => Tag { text: self.to_string(), anchor: Anchor::NE, font_idx: Some(1), color_idx: None, ..Default::default() }
+            Tags::LeftTextRight(_) => Tag { text: self.to_string(), anchor: Anchor::SE, font_idx: None, color_idx: None, ..Default::default() },
+            Tags::EscEnter => Tag { text: self.to_string(), anchor: Anchor::NE, font_idx: Some(0), color_idx: None, ..Default::default() }
         }
     }
 

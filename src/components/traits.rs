@@ -30,11 +30,21 @@ pub trait UiEventHandler {
 }
 
 
+#[derive(Debug, Clone)]
 pub enum UiEvent {
     KeyDown(KeyboardEvent),
-    #[allow(dead_code)]
     KeyUp(KeyboardEvent),
     RightMouseDown(MouseEvent),
+}
+
+impl UiEvent {
+    pub fn modifiers(&self) -> ModifierState {
+        match self {
+            UiEvent::KeyDown(event) => event.modifiers,
+            UiEvent::KeyUp(event) => event.modifiers,
+            UiEvent::RightMouseDown(event) => event.modifiers,
+        }
+    }
 }
 
 pub enum Direction {
@@ -47,11 +57,11 @@ pub enum SetWindowPosCommand {
 }
 
 pub enum UiEventResult {
-    #[allow(dead_code)]
     Handled,
     NotHandled,
     RequiresRedraw,
     PadSelected(PadId),
+    CloseWindow,
     SetWindowPos(SetWindowPosCommand),
     RequestChildWindow(ChildWindowRequest),
 
@@ -65,7 +75,6 @@ pub enum UiEventResult {
         result: Box<dyn Any>, // Type-erased result
     },
 
-    #[allow(dead_code)]
     ReplaceState {
         board: Box<dyn BoardComponent>,
     },
@@ -85,6 +94,7 @@ impl From<KeyboardEvent> for VIRTUAL_KEY {
 }
 
 
+#[derive(Copy, Clone, Debug)]
 pub struct MouseEvent {
     pub target: MouseEventTarget,
     pub modifiers: ModifierState,
@@ -94,13 +104,12 @@ pub struct MouseEvent {
 #[derive(Debug, Clone)]
 pub enum ChildWindowRequest {
     PadEditor,
-    #[allow(dead_code)]
-    StringEditor { editor_id: u32 },
     ColorEditor,
     FontSelector,
+    ChainEditor,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Copy, Debug, Clone)]
 pub enum MouseEventTarget {
     Header,
     Pad(PadId)

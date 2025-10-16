@@ -244,6 +244,7 @@ pub struct Pad {
     pub color_scheme: Option<ColorScheme>,
     pub text_style: Option<TextStyle>,
     pub tags: Vec<Tag>,
+    pub disabled: bool,
 }
 
 impl Default for Pad {
@@ -254,6 +255,7 @@ impl Default for Pad {
             color_scheme: None,
             text_style: None,
             tags: Vec::new(),
+            disabled: false,
         }
     }
 }
@@ -266,18 +268,20 @@ impl From<PadId> for Pad {
             color_scheme: None,
             text_style: None,
             tags: Vec::new(),
+            disabled: false,
         }
     }
 }
 
 impl Pad {
-    pub fn new(pad_id: PadId, pad: core::data::Pad, color_scheme: Option<ColorScheme>, text_style: Option<TextStyle>, tags: Vec<Tag>) -> Self {
+    pub fn new(pad_id: PadId, pad: core::data::Pad, color_scheme: Option<ColorScheme>, text_style: Option<TextStyle>, tags: Vec<Tag>, disabled: bool) -> Self {
         Pad {
             pad_id,
             data: pad,
             color_scheme,
             text_style,
             tags,
+            disabled,
         }
     }
 
@@ -309,11 +313,21 @@ impl Pad {
         &self.tags
     }
 
+    pub fn disabled(&self) -> bool {
+        self.disabled
+    }
+
     pub fn as_data(&self) -> core::data::Pad {
         let mut pad = self.data.clone();
         pad.color_scheme = self.color_scheme.as_ref().map(|cs| cs.name.clone());
         pad.text_style = self.text_style.as_ref().map(|ts| ts.name.clone());
         pad
+    }
+
+    #[allow(dead_code)]
+    pub fn as_disabled(mut self) -> Self {
+        self.disabled = true;
+        self
     }
 
     pub fn with_data(mut self, pad: core::data::Pad) -> Self {
@@ -392,6 +406,14 @@ impl Color {
             r: 255 - self.r,
             g: 255 - self.g,
             b: 255 - self.b,
+        }
+    }
+
+    pub fn equidistant(&self, other: &Self) -> Self {
+        Self {
+            r: ((self.r as u16 + other.r as u16) / 2) as u8,
+            g: ((self.g as u16 + other.g as u16) / 2) as u8,
+            b: ((self.b as u16 + other.b as u16) / 2) as u8,
         }
     }
 }
@@ -570,6 +592,7 @@ impl From<(PadId, core::data::Pad)> for Pad {
             color_scheme: None,
             text_style: None,
             tags: Vec::new(),
+            disabled: false,
         }
     }
 }

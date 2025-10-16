@@ -111,6 +111,9 @@ pub struct SettingsData {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layout: Option<LayoutSettings>,
 
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub natural_key_order: bool,
+
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     includes: Vec<String>,
 
@@ -130,6 +133,7 @@ impl Default for SettingsData {
             boards: vec![],
             padsets: vec![],
             layout: None,
+            natural_key_order: false,
             includes: vec![],
             source_mappings: vec![],
         }
@@ -529,6 +533,7 @@ mod tests {
             boards: vec![],
             padsets: vec![],
             layout: None,
+            natural_key_order: true,
             includes: vec![],
             source_mappings: vec![],
         };

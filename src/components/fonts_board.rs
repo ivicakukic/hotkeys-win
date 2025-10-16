@@ -2,10 +2,13 @@ use std::{rc::Rc};
 
 use windows::Win32::{Foundation::HWND, UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_C, VK_D, VK_DELETE, VK_DOWN, VK_ESCAPE, VK_F2, VK_LEFT, VK_R, VK_RETURN, VK_RIGHT, VK_S, VK_UP}};
 
-use super::{ apply_string, BoardComponent, ChildWindowRequest, StringEditorBoard, UiEvent, UiEventHandler, UiEventResult, controls::Tags };
+use super::{
+    BoardComponent, ChildWindowRequest, UiEvent, UiEventHandler, UiEventResult, EnumAll, EnumTraversal, Tags,
+    apply_string, apply_bool, string_editor_board, yes_no_question_board,
+};
 
 use crate::{
-    core::{self, SettingsRepository, SettingsRepositoryMut}, impl_board_component_generic, input::{ModifierState, TextCapture}, model::{Anchor, Board, ColorScheme, Pad, PadId, PadSet, Tag, TextStyle, TextStyleHandle}, ui::dialogs::open_font_editor
+    core::{self, SettingsRepository, SettingsRepositoryMut}, impl_board_component_generic, input::ModifierState, model::{Anchor, Board, ColorScheme, Pad, PadId, PadSet, Tag, TextStyle, TextStyleHandle}, ui::dialogs::open_font_editor
 };
 
 
@@ -47,12 +50,16 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> TextStyleEditorBoa
                 UiEventResult::RequiresRedraw
             }
             VK_D | VK_DELETE => {
-                if let Ok(ts) = self.handle.as_data() {
-                    self.handle.move_next();
-                    self.repository.delete_text_style(&ts.name)
-                        .unwrap_or_else(|e| log::error!("Failed to delete text style: {}", e));
+                if let Ok(_) = self.handle.as_data() {
+                    return UiEventResult::PushState {
+                        board: Box::new(yes_no_question_board(
+                            format!("Delete\n\"{}\"?", self.handle.name()), self
+                        )),
+                        context: Box::new("Delete"),
+                    }
+                } else {
+                    return UiEventResult::NotHandled
                 }
-                UiEventResult::RequiresRedraw
             }
             VK_DOWN | VK_RETURN => {
                 UiEventResult::PushState {
@@ -64,15 +71,9 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> TextStyleEditorBoa
                 match self.handle.as_data().ok() {
                     Some(_) => {
                         UiEventResult::PushState {
-                            board: Box::new(StringEditorBoard {
-                                text_capture: TextCapture::new(self.title().into(), false),
-                                text_style: Some(self.text_style()),
-                                color_scheme: Some(self.color_scheme()),
-                                tags: vec![
-                                    Tag { text: "Title".to_string(), anchor: Anchor::NW, color_idx: Some(0), ..Default::default() },
-                                    Tags::EscEnter.default(),
-                                ],
-                            }),
+                            board: Box::new(string_editor_board(
+                                self.title(), self, self.handle.name().to_string()
+                            )),
                             context: Box::new("Title"),
                         }
                     },
@@ -129,7 +130,7 @@ impl<R: SettingsRepository + SettingsRepositoryMut> Board for TextStyleEditorBoa
         Box::new(vec![EditModeBoard::<R>::preview_pad()])
     }
 
-    fn tags(&self) -> Vec<Tag> {
+    fn tags(&self, _modifier: Option<ModifierState>) -> Vec<Tag> {
         vec![
             Tags::LeftRight.default(),
             Tags::EscEnter.default(),
@@ -152,9 +153,20 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> UiEventHandler for
     }
 
     fn handle_child_result(&mut self, context: Box<dyn std::any::Any>, result: Box<dyn std::any::Any>) -> UiEventResult {
-        if let Some(title) = context.downcast_ref::<&str>() {
-            if *title == "Title" {
+        if let Some(context) = context.downcast_ref::<&str>() {
+            if *context == "Title" {
                 return apply_string(result, |new_name| self.rename_text_style(new_name))
+            } else if *context == "Delete" {
+                return apply_bool(result, |confirmed| {
+                    if confirmed {
+                        if let Ok(ts) = self.handle.as_data() {
+                            self.handle.move_next();
+                            self.repository.delete_text_style(&ts.name)
+                                .unwrap_or_else(|e| log::error!("Failed to delete text style: {}", e));
+                        }
+                    }
+                    Ok(())
+                });
             }
         }
         UiEventResult::NotHandled
@@ -163,7 +175,7 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> UiEventHandler for
 
 impl_board_component_generic!(TextStyleEditorBoard<R>);
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum EditMode {
     Header,
     PadHeader,
@@ -173,31 +185,22 @@ enum EditMode {
     Palette(i32)
 }
 
+impl EnumAll<EditMode> for EditMode {
+    fn all() -> Vec<EditMode> {
+        vec![
+            EditMode::Header,
+            EditMode::PadHeader,
+            EditMode::PadText,
+            EditMode::Tag,
+            EditMode::PadId,
+            EditMode::Palette(0),
+            EditMode::Palette(1),
+            EditMode::Palette(2),
+        ]
+    }
+}
+
 impl EditMode {
-    fn next(&self) -> EditMode {
-        match self {
-            EditMode::Header => EditMode::PadHeader,
-            EditMode::PadHeader => EditMode::PadText,
-            EditMode::PadText => EditMode::Tag,
-            EditMode::Tag => EditMode::PadId,
-            EditMode::PadId => EditMode::Palette(0),
-            EditMode::Palette(i) if *i < 2 => EditMode::Palette(i + 1),
-            EditMode::Palette(_) => EditMode::Header,
-        }
-    }
-
-    fn prev(&self) -> EditMode {
-        match self {
-            EditMode::Header => EditMode::Palette(2),
-            EditMode::PadHeader => EditMode::Header,
-            EditMode::PadText => EditMode::PadHeader,
-            EditMode::Tag => EditMode::PadText,
-            EditMode::PadId => EditMode::Tag,
-            EditMode::Palette(i) if *i > 0 => EditMode::Palette(i - 1),
-            EditMode::Palette(_) => EditMode::PadId,
-        }
-    }
-
     fn get_font(&self, text_style: &TextStyle) -> String {
         match self {
             EditMode::Header => text_style.header_font.clone(),
@@ -349,7 +352,7 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> Board for EditMode
         Box::new(padset)
     }
 
-    fn tags(&self) -> Vec<Tag> {
+    fn tags(&self, _modifier: Option<ModifierState>) -> Vec<Tag> {
         self.mode.header_tags().into_iter()
         .chain(
             vec![
@@ -379,7 +382,7 @@ impl<R: SettingsRepository + SettingsRepositoryMut + 'static> UiEventHandler for
                         if vk_code == VK_DOWN {
                             self.mode = self.mode.next();
                         } else {
-                            self.mode = self.mode.prev();
+                            self.mode = self.mode.previous();
                         }
                         UiEventResult::RequiresRedraw
                     },

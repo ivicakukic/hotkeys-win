@@ -4,7 +4,7 @@
       "name": "default",
       "opacity": 0.8,
       "background": "#00007f",
-      "foreground1": "#9494d9",
+      "foreground1": "#6464b4",
       "foreground2": "#dbdbec",
       "tag_foreground": "#dbdbec",
       "palette": [
@@ -102,8 +102,8 @@
       "pad_id_font": "Impact 20",
       "tag_font": "Consolas Bold 18",
       "palette": [
-        "Consolas 14",
-        "Consolas Italic 14",
+        "Consolas 16",
+        "Arial Italic 14",
         "Consolas Bold 24",
         "Cascadia Code Bold 28"
       ]

@@ -590,6 +590,38 @@
                "custom"
             ],
             "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "chain": {
+                "type": "object",
+                "properties": {
+                  "boards": {
+                    "type": "string",
+                    "description": "Comma-separated list of board names to include in the chain"
+                  },
+                  "initial_board": {
+                    "type": "string",
+                    "description": "Optional initial board to show when the chain is activated"
+                  },
+                  "params": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/Param"
+                    }
+                  }
+                },
+                "required": [
+                  "boards"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+               "chain"
+            ],
+            "additionalProperties": false
           }
         ],
         "description": "Type of the board. 'static' is a regular board, 'home' is the home board that shows all available boards, or a 'custom' object with type and parameters."
