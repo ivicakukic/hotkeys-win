@@ -1,6 +1,4 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-#![feature(unboxed_closures)]
-#![feature(fn_traits)]
 // #![allow(dead_code)]
 
 mod framework;
