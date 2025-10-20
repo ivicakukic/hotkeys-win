@@ -8,21 +8,16 @@
     {
       "kind": "home",
       "name": "home",
+      "icon": "icon.png",
       "detection": "none"
     },
     {
       "kind": "home",
       "name": "settings",
+      "icon": "gear.svg",
       "detection": "none"
     }
   ],
-  "layout": {
-    "x": 523,
-    "y": 200,
-    "width": 1012,
-    "height": 646,
-    "window_style": "Taskbar"
-  },
   "includes": [
     "settings.styling.json"
   ]

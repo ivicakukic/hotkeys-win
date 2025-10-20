@@ -51,7 +51,7 @@ impl Default for WindowLayout {
         }
 
         let style = WindowStyle::Taskbar;
-        let (width, height) = (800, 600);
+        let (width, height) = (862, 568);
         let (scr_width, scr_height) = get_screen_size().unwrap_or((width, height));
 
         // center the window on the screen
