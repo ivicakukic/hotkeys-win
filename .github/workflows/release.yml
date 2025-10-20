@@ -37,6 +37,10 @@ jobs:
           copy resources\log.toml release\resources\
           copy resources\icons\gear.svg release\resources\icons\gear.svg
           copy resources\icons\icon.png release\resources\icons\icon.png
+          copy resources\icons\error.svg release\resources\icons\error.svg
+          copy resources\icons\info.svg release\resources\icons\info.svg
+          copy resources\icons\question.svg release\resources\icons\question.svg
+          copy resources\icons\warning.svg release\resources\icons\warning.svg
           xcopy resources\schemas release\resources\schemas\ /E /I
           xcopy docs release\docs\ /E /I
           7z a hotkeys-windows-${{ github.ref_name }}.zip release\*
